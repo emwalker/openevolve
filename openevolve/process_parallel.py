@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from openevolve.config import Config
-from openevolve.database import Program, ProgramDatabase
+from openevolve.database import Program, ProgramDatabase, lane_group_of
 from openevolve.utils.metrics_utils import safe_numeric_average
 
 logger = logging.getLogger(__name__)
@@ -159,6 +159,17 @@ def _run_iteration_worker(
             key=lambda p: p.metrics.get("combined_score", safe_numeric_average(p.metrics)),
             reverse=True,
         )
+
+        # Scope the exemplar lists to the parent's group when configured, so a
+        # group whose ceiling sits below the global top-N still sees its own
+        # exemplars instead of another group's. The config sizes then act as true
+        # display sizes rather than a pool the controller must post-filter.
+        lane_metric = getattr(_worker_config.database, "lane_metric", None)
+        if getattr(_worker_config.database, "lane_prompt_scope", False) and lane_metric:
+            parent_group = lane_group_of(parent, lane_metric)
+            island_programs = [
+                p for p in island_programs if lane_group_of(p, lane_metric) == parent_group
+            ]
 
         # Use config values for limits instead of hardcoding
         # Programs for LLM display (includes both top and diverse for inspiration)
@@ -308,6 +319,10 @@ def _run_iteration_worker(
                 "changes": changes_summary,
                 "parent_metrics": parent.metrics,
                 "island": parent_island,
+                # Provenance: which programs were offered as inspiration when this
+                # child was generated (whether or not the prompt rendered them all).
+                # Lineage/cross-group attribution is derived from these later.
+                "inspiration_ids": list(inspiration_ids),
             },
         )
 

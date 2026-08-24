@@ -19,7 +19,7 @@ import numpy as np
 
 from openevolve.config import DatabaseConfig
 from openevolve.utils.code_utils import calculate_edit_distance
-from openevolve.utils.metrics_utils import safe_numeric_average, get_fitness_score
+from openevolve.utils.metrics_utils import get_fitness_score, safe_numeric_average
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +38,30 @@ def _safe_avg_metrics(metrics: Dict[str, Any]) -> float:
         v for v in metrics.values() if isinstance(v, (int, float)) and not isinstance(v, bool)
     ]
     return sum(numeric_values) / max(1, len(numeric_values)) if numeric_values else 0.0
+
+
+def lane_group_of(program: "Program", lane_metric: Optional[str]) -> Any:
+    """The program's lane-group key under `lane_metric` (a rounded-int bucket).
+
+    Missing/unparseable metric -> -1; no lane_metric configured -> None. Free of
+    any ProgramDatabase state so evaluation workers, which hold no database, can
+    group programs the same way the controller does.
+    """
+    if lane_metric is None:
+        return None
+    value = (program.metrics or {}).get(lane_metric)
+    if value is None:
+        return -1
+    try:
+        return int(round(float(value)))
+    except (TypeError, ValueError):
+        return -1
+
+
+def _group_score(program: "Program") -> float:
+    """Combined score for within-group ranking; missing sorts to the bottom."""
+    value = (program.metrics or {}).get("combined_score") if program.metrics else None
+    return float(value) if value is not None else float("-inf")
 
 
 @dataclass
@@ -162,6 +186,42 @@ class ProgramDatabase:
         # Track the last iteration number (for resuming)
         self.last_iteration: int = 0
 
+        # Lanes fork: declared feature-axis domains (pin scaling range, no ratchet)
+        # and lane-aware eviction metric. Both default to upstream behavior. Set
+        # BEFORE load(), so a from-disk construction sees them (load()'s split-grid
+        # check reads lane_split_grids).
+        self.feature_domains: Dict[str, List[float]] = dict(
+            getattr(config, "feature_domains", {}) or {}
+        )
+        self.lane_metric: Optional[str] = getattr(config, "lane_metric", None)
+        # First-class record of every program removal (population cap, orphaning).
+        self.eviction_journal: List[Dict[str, Any]] = []
+
+        # Lanes fork: group-aware parent sampling, prompt scoping, and split grids.
+        # All inert unless lane_metric is set.
+        self.lane_sampling_gamma: Optional[float] = getattr(config, "lane_sampling_gamma", None)
+        self.lane_rank_weight: float = getattr(config, "lane_rank_weight", 0.0)
+        self.lane_rank_power: float = getattr(config, "lane_rank_power", 1.0)
+        self.lane_prompt_scope: bool = getattr(config, "lane_prompt_scope", False)
+        self.lane_cross_inspirations: int = getattr(config, "lane_cross_inspirations", 1)
+        self.lane_split_grids: bool = getattr(config, "lane_split_grids", False)
+        self.lane_group_migration: bool = getattr(config, "lane_group_migration", False)
+        if (
+            self.lane_sampling_gamma
+            or self.lane_prompt_scope
+            or self.lane_split_grids
+            or self.lane_group_migration
+        ) and self.lane_metric is None:
+            logger.warning(
+                "lane_sampling_gamma/lane_prompt_scope/lane_split_grids/lane_group_migration "
+                "set without lane_metric; ignoring (group-aware behavior needs a metric to "
+                "group by)"
+            )
+            self.lane_sampling_gamma = None
+            self.lane_prompt_scope = False
+            self.lane_split_grids = False
+            self.lane_group_migration = False
+
         # Load database from disk if path is provided
         if config.db_path and os.path.exists(config.db_path):
             self.load(config.db_path)
@@ -211,7 +271,12 @@ class ProgramDatabase:
         self.similarity_threshold = config.similarity_threshold
 
     def add(
-        self, program: Program, iteration: int = None, target_island: Optional[int] = None
+        self,
+        program: Program,
+        iteration: int = None,
+        target_island: Optional[int] = None,
+        skip_novelty: bool = False,
+        protected_ids: Optional[Set[str]] = None,
     ) -> str:
         """
         Add a program to the database
@@ -220,6 +285,10 @@ class ProgramDatabase:
             program: Program to add
             iteration: Current iteration (defaults to last_iteration)
             target_island: Specific island to add to (auto-detects parent's island if None)
+            skip_novelty: Bypass the novelty/similarity filter (used by inject(), where
+                a deliberately-placed program must not be silently dropped as a near-duplicate)
+            protected_ids: Extra program ids to shield from the population cull this add
+                triggers (used by inject() to protect earlier clones in the same batch)
 
         Returns:
             Program ID
@@ -267,14 +336,14 @@ class ProgramDatabase:
         island_idx = island_idx % len(self.islands)  # Ensure valid island
 
         # Novelty check before adding
-        if not self._is_novel(program.id, island_idx):
+        if not skip_novelty and not self._is_novel(program.id, island_idx):
             logger.debug(
                 f"Program {program.id} failed in novelty check and won't be added in the island {island_idx}"
             )
             return program.id  # Do not add non-novel program
 
         # Add to island-specific feature map (replacing existing if better)
-        feature_key = self._feature_coords_to_key(feature_coords)
+        feature_key = self._feature_coords_to_key(feature_coords, group=self._lane_of(program))
         island_feature_map = self.island_feature_maps[island_idx]
         should_replace = feature_key not in island_feature_map
 
@@ -358,7 +427,7 @@ class ProgramDatabase:
 
         # Enforce population size limit BEFORE updating best program tracking
         # This ensures newly added programs aren't immediately removed
-        self._enforce_population_limit(exclude_program_id=program.id)
+        self._enforce_population_limit(exclude_program_id=program.id, protected_ids=protected_ids)
 
         # Update the absolute best program tracking (after population enforcement)
         self._update_best_program(program)
@@ -386,6 +455,77 @@ class ProgramDatabase:
         logger.debug(f"Added program {program.id} to island {island_idx}")
 
         return program.id
+
+    def inject(
+        self,
+        program: Program,
+        islands: List[int],
+        iteration: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Add an externally-created program to specific islands, with persistence
+        and full accounting.
+
+        Injection places seed / curriculum programs from outside the evolutionary
+        loop. For each island the program is cloned with id
+        ``f"{program.id}-i{island}"`` and ``metadata["injected"] = True``; a clone
+        whose id already exists is skipped, so re-running an injection is
+        idempotent. Every clone is added with the novelty filter bypassed and is
+        protected -- along with the other clones in this batch -- from the
+        population cull its addition triggers, so a low-scoring seed cannot be
+        silently dropped. Anything removed as a consequence (a displaced cell
+        owner, an orphan, a population cull) is recorded in the eviction journal
+        and returned. The caller's ``program`` is not mutated, and no checkpoint
+        is written -- the caller owns save placement.
+
+        Returns a report ``{"added", "skipped", "removed"}``: ids that persist,
+        ids skipped as already-present, and the journal entries this call produced.
+        """
+        clone_ids = [f"{program.id}-i{island}" for island in islands]
+        batch = set(clone_ids)
+        journal_start = len(self.eviction_journal)
+
+        added: List[str] = []
+        skipped: List[str] = []
+        for island, clone_id in zip(islands, clone_ids):
+            if clone_id in self.programs:
+                skipped.append(clone_id)
+                continue
+            clone = Program(
+                id=clone_id,
+                code=program.code,
+                language=program.language,
+                parent_id=program.parent_id,
+                metrics=dict(program.metrics),
+                iteration_found=iteration if iteration is not None else self.last_iteration,
+                metadata={
+                    **dict(program.metadata),
+                    "island": island % len(self.islands),
+                    "injected": True,
+                },
+            )
+            self.add(
+                clone,
+                iteration=iteration,
+                target_island=island,
+                skip_novelty=True,
+                protected_ids=batch,
+            )
+            added.append(clone_id)
+
+        removed = self.eviction_journal[journal_start:]
+        journaled = {entry["id"] for entry in removed}
+
+        # Post-condition: no silent loss. A clone we added is either still present
+        # or accounted for in the journal delta (displaced by a same-cell sibling,
+        # already listed under `removed`); anything else is a bug.
+        present = []
+        for clone_id in added:
+            if clone_id in self.programs:
+                present.append(clone_id)
+            elif clone_id not in journaled:
+                raise RuntimeError(f"injected program {clone_id} vanished without a journal entry")
+
+        return {"added": present, "skipped": skipped, "removed": removed}
 
     def get(self, program_id: str) -> Optional[Program]:
         """
@@ -641,7 +781,15 @@ class ProgramDatabase:
             "island_generations": self.island_generations,
             "last_migration_generation": self.last_migration_generation,
             "feature_stats": self._serialize_feature_stats(),
+            "eviction_journal": self.eviction_journal,
         }
+
+        # Per-group summary, readable straight from the checkpoint without a load.
+        # Derivable, so load() does not restore it. Group-int keys become strings
+        # through json, as with any int-keyed metadata field.
+        lane_report = self.lane_report()
+        if lane_report:
+            metadata["lane_report"] = lane_report
 
         with open(os.path.join(save_path, "metadata.json"), "w") as f:
             json.dump(metadata, f)
@@ -669,6 +817,21 @@ class ProgramDatabase:
             self.island_feature_maps = metadata.get(
                 "island_feature_maps", [{} for _ in range(self.config.num_islands)]
             )
+            # lane_split_grids expects group-prefixed cell keys ("g:coords"). A
+            # checkpoint saved under the shared grid has bare keys; resuming it
+            # under split grids would mix key formats and corrupt cell ownership.
+            # Warn loudly rather than silently degrade -- the fix is to re-key the
+            # checkpoint before resuming.
+            if self.lane_split_grids and any(
+                keys and not all(":" in k for k in keys)
+                for keys in (m.keys() for m in self.island_feature_maps)
+            ):
+                logger.warning(
+                    "lane_split_grids is on but %s has un-prefixed cell keys -- this "
+                    "checkpoint predates per-group grids and must be re-keyed before "
+                    "resuming, or cell ownership will corrupt.",
+                    path,
+                )
             saved_islands = metadata.get("islands", [])
             self.archive = set(metadata.get("archive", []))
             self.best_program_id = metadata.get("best_program_id")
@@ -682,6 +845,7 @@ class ProgramDatabase:
 
             # Load feature_stats for MAP-Elites grid stability
             self.feature_stats = self._deserialize_feature_stats(metadata.get("feature_stats", {}))
+            self.eviction_journal = metadata.get("eviction_journal", [])
 
             logger.info(f"Loaded database metadata with last_iteration={self.last_iteration}")
             if self.feature_stats:
@@ -965,17 +1129,22 @@ class ProgramDatabase:
 
         return bin_idx
 
-    def _feature_coords_to_key(self, coords: List[int]) -> str:
+    def _feature_coords_to_key(self, coords: List[int], group: Any = None) -> str:
         """
         Convert feature coordinates to a string key
 
         Args:
             coords: Feature coordinates
+            group: Lane group to prefix (only used when lane_split_grids is on);
+                gives each group its own grid so keys never collide across groups
 
         Returns:
             String key
         """
-        return "-".join(str(c) for c in coords)
+        key = "-".join(str(c) for c in coords)
+        if self.lane_split_grids and group is not None:
+            return f"{group}:{key}"
+        return key
 
     def _cosine_similarity(self, vec1: List[float], vec2: List[float]) -> float:
         """
@@ -1005,6 +1174,7 @@ class ProgramDatabase:
         Use LLM to judge if a program is novel compared to a similar existing program
         """
         import asyncio
+
         from openevolve.novelty_judge import NOVELTY_SYSTEM_MSG, NOVELTY_USER_MSG
 
         user_msg = NOVELTY_USER_MSG.format(
@@ -1379,7 +1549,9 @@ class ProgramDatabase:
             else:
                 return next(iter(self.programs.values()))
 
-        # Sample from valid programs
+        # Group-balanced selection when configured, else uniform (upstream).
+        if self.lane_sampling_gamma is not None:
+            return self._group_weighted_choice(valid_programs)
         parent_id = random.choice(valid_programs)
         return self.programs[parent_id]
 
@@ -1518,7 +1690,9 @@ class ProgramDatabase:
             )
             return self._sample_random_parent()
 
-        # Uniform random selection
+        # Group-balanced selection when configured, else uniform (upstream).
+        if self.lane_sampling_gamma is not None:
+            return self._group_weighted_choice(valid_programs)
         parent_id = random.choice(valid_programs)
         return self.programs[parent_id]
 
@@ -1561,6 +1735,44 @@ class ProgramDatabase:
             parent_id = random.choice(valid_archive)
             return self.programs[parent_id]
 
+    def _sample_inspirations_scoped(
+        self, parent: Program, n: int, island_id: Optional[int]
+    ) -> Optional[List[Program]]:
+        """Group-scoped inspirations: the parent's own group best, then a few
+        honest cross-group exemplars filling the tail.
+
+        Fills the first ``n - lane_cross_inspirations`` slots (at least one) with
+        the highest-scoring same-group island members, then up to
+        ``lane_cross_inspirations`` best members of other groups -- so the prompt
+        shows a group its own exemplars while keeping a labelled cross-group
+        reference. Returns None when the parent's group has no other island
+        members, so the caller falls back to the upstream (group-blind) sampler.
+        """
+        if island_id is None:
+            parent_island = parent.metadata.get("island", self.current_island)
+        else:
+            parent_island = island_id
+        parent_island %= len(self.islands)
+
+        parent_group = self._lane_of(parent)
+        members = [
+            self.programs[pid]
+            for pid in self.islands[parent_island]
+            if pid in self.programs and pid != parent.id
+        ]
+        same = [p for p in members if self._lane_of(p) == parent_group]
+        if not same:  # thin/empty group on this island: upstream owns the fallback
+            return None
+
+        same.sort(key=_group_score, reverse=True)
+        k = max(0, self.lane_cross_inspirations)
+        chosen = same[: max(1, n - k)]
+        if k and len(chosen) < n:
+            cross = [p for p in members if self._lane_of(p) != parent_group]
+            cross.sort(key=_group_score, reverse=True)
+            chosen = chosen + cross[: min(k, n - len(chosen))]
+        return chosen[:n]
+
     def _sample_inspirations(
         self, parent: Program, n: int = 5, island_id: Optional[int] = None
     ) -> List[Program]:
@@ -1579,6 +1791,13 @@ class ProgramDatabase:
         Returns:
             List of inspiration programs from the current island
         """
+        # Group-scoped composition when configured: same-group best plus a few
+        # honestly-labelled cross-group exemplars (see _sample_inspirations_scoped).
+        if self.lane_prompt_scope:
+            scoped = self._sample_inspirations_scoped(parent, n, island_id)
+            if scoped is not None:
+                return scoped
+
         inspirations = []
 
         # Prefer an explicitly requested island. This matters for
@@ -1639,10 +1858,13 @@ class ProgramDatabase:
                 if prog_id in self.programs:
                     prog = self.programs[prog_id]
                     prog_coords = self._calculate_feature_coords(prog)
-                    cell_key = self._feature_coords_to_key(prog_coords)
+                    cell_key = self._feature_coords_to_key(prog_coords, group=self._lane_of(prog))
                     island_feature_map[cell_key] = prog_id
 
-            # Try to find programs from nearby feature cells within the island
+            # Try to find programs from nearby feature cells within the island. With
+            # split grids the perturbed lookup uses the parent's group prefix, so it
+            # searches within the parent's own lane.
+            parent_group = self._lane_of(parent)
             for _ in range(remaining_slots * 3):  # Try more times to find nearby programs
                 # Perturb coordinates
                 perturbed_coords = [
@@ -1650,7 +1872,7 @@ class ProgramDatabase:
                     for c in feature_coords
                 ]
 
-                cell_key = self._feature_coords_to_key(perturbed_coords)
+                cell_key = self._feature_coords_to_key(perturbed_coords, group=parent_group)
                 if cell_key in island_feature_map:
                     program_id = island_feature_map[cell_key]
                     if (
@@ -1723,17 +1945,171 @@ class ProgramDatabase:
                 return
 
         # Fully orphaned - remove from all remaining structures.
+        self._journal_removal(self.programs[program_id], "orphaned")
         del self.programs[program_id]
         self.archive.discard(program_id)
         self._cleanup_stale_island_bests()
         logger.debug(f"Removed orphaned program {program_id} displaced from its cell")
 
-    def _enforce_population_limit(self, exclude_program_id: Optional[str] = None) -> None:
+    def _lane_of(self, program: Program) -> Any:
+        """The program's lane-group key under the configured lane_metric.
+
+        A rounded-to-int bucket of the metric value; missing/unparseable groups
+        as -1. Returns None when no lane_metric is configured (upstream mode).
+        """
+        return lane_group_of(program, self.lane_metric)
+
+    def lane_report(self) -> Dict[Any, Dict[str, Any]]:
+        """Per-group population summary keyed on lane_metric groups.
+
+        For each group: population, cell-owner (elite) count, homeless count,
+        best combined_score, and a seeded/evolved split (seeded = injected or
+        parentless, evolved = has a parent). Empty when lane_metric is unset --
+        there is nothing to group by. Derived on demand; save() embeds a copy so
+        a checkpoint's per-group state is readable without loading the database.
+        """
+        if self.lane_metric is None:
+            return {}
+        elite_ids = set()
+        for island_map in self.island_feature_maps:
+            elite_ids.update(island_map.values())
+
+        report: Dict[Any, Dict[str, Any]] = {}
+        for program in self.programs.values():
+            lane = self._lane_of(program)
+            row = report.setdefault(
+                lane,
+                {
+                    "population": 0,
+                    "elite": 0,
+                    "homeless": 0,
+                    "best_combined_score": None,
+                    "seeded": 0,
+                    "evolved": 0,
+                },
+            )
+            row["population"] += 1
+            if program.id in elite_ids:
+                row["elite"] += 1
+            else:
+                row["homeless"] += 1
+            score = (program.metrics or {}).get("combined_score")
+            if score is not None and (
+                row["best_combined_score"] is None or score > row["best_combined_score"]
+            ):
+                row["best_combined_score"] = score
+            if program.metadata.get("injected") or not program.parent_id:
+                row["seeded"] += 1
+            else:
+                row["evolved"] += 1
+        return report
+
+    def _group_weights(self, programs: List[Program]) -> List[float]:
+        """Per-element parent-draw weights under group-balanced sampling.
+
+        Each group's aggregate weight is ``n ** (1 - gamma)`` for its size ``n``,
+        split across members by ascending score rank ``r`` as
+        ``(1 - w)/n + w * (r/n) ** p`` (normalised within the group). So a group's
+        total draw share is independent of how large its members' scores are, and
+        within a group higher scorers are favoured while the floor keeps every
+        member reachable. ``w = 0`` reduces to uniform ``n ** -gamma`` per member.
+        """
+        gamma = float(self.lane_sampling_gamma)
+        w = self.lane_rank_weight
+        p = self.lane_rank_power
+        by_group: Dict[Any, List[int]] = {}
+        for i, program in enumerate(programs):
+            by_group.setdefault(self._lane_of(program), []).append(i)
+
+        weights = [0.0] * len(programs)
+        for idxs in by_group.values():
+            n = len(idxs)
+            group_total = n ** (1.0 - gamma)
+            order = sorted(idxs, key=lambda i: _group_score(programs[i]))  # ascending, stable
+            rank = {pos: r for r, pos in enumerate(order, start=1)}
+            raw = {pos: (1.0 - w) / n + w * (rank[pos] / n) ** p for pos in idxs}
+            norm = sum(raw.values())
+            for pos in idxs:
+                weights[pos] = group_total * raw[pos] / norm
+        return weights
+
+    def _group_weighted_choice(self, valid_ids: List[str]) -> Program:
+        """Pick one parent from `valid_ids`, biased toward under-populated groups
+        and each group's higher scorers (see `_group_weights`)."""
+        programs = [self.programs[pid] for pid in valid_ids]
+        weights = self._group_weights(programs)
+        return random.choices(programs, weights=weights, k=1)[0]
+
+    def _journal_removal(
+        self, program: Program, reason: str, evictor_id: Optional[str] = None
+    ) -> None:
+        """Record a program removal in the eviction journal (diagnostic only)."""
+        self.eviction_journal.append(
+            {
+                "id": program.id,
+                "reason": reason,
+                "combined_score": (program.metrics or {}).get("combined_score"),
+                "lane": self._lane_of(program),
+                "evictor_id": evictor_id,
+                "iteration": self.last_iteration,
+            }
+        )
+
+    def _select_removals(
+        self,
+        num_to_remove: int,
+        non_elite: List[Program],
+        elite: List[Program],
+        all_programs: List[Program],
+    ) -> List[Program]:
+        """Choose up to `num_to_remove` programs to evict.
+
+        Upstream (lane_metric is None): worst-first among homeless, then elite.
+        Group-balanced (lane_metric set): repeatedly evict the worst homeless
+        program from the most-populous lane group, so a group whose scores are
+        numerically larger cannot crowd out another group's members. `non_elite`
+        must be pre-sorted worst-first. Falls back to elite worst-first only if
+        homeless programs run out, exactly as upstream does.
+        """
+        if self.lane_metric is None:
+            chosen = non_elite[:num_to_remove]
+            if len(chosen) < num_to_remove:
+                chosen = chosen + elite[: num_to_remove - len(chosen)]
+            return chosen
+
+        group_pop: Dict[Any, int] = {}
+        for program in all_programs:
+            lane = self._lane_of(program)
+            group_pop[lane] = group_pop.get(lane, 0) + 1
+        by_group: Dict[Any, List[Program]] = {}
+        for program in non_elite:  # already worst-first, so each list stays worst-first
+            by_group.setdefault(self._lane_of(program), []).append(program)
+
+        chosen: List[Program] = []
+        for _ in range(num_to_remove):
+            candidates = [lane for lane, ps in by_group.items() if ps]
+            if not candidates:
+                break
+            # Most-populous group; ties -> more homeless remaining there.
+            lane = max(candidates, key=lambda g: (group_pop[g], len(by_group[g])))
+            chosen.append(by_group[lane].pop(0))  # worst-scoring homeless in that group
+            group_pop[lane] -= 1
+        if len(chosen) < num_to_remove:
+            chosen.extend(elite[: num_to_remove - len(chosen)])
+        return chosen
+
+    def _enforce_population_limit(
+        self,
+        exclude_program_id: Optional[str] = None,
+        protected_ids: Optional[Set[str]] = None,
+    ) -> None:
         """
         Enforce the population size limit by removing worst programs if needed
 
         Args:
             exclude_program_id: Program ID to never remove (e.g., newly added program)
+            protected_ids: Additional program ids to never remove (e.g., other clones
+                in an inject() batch, so a later add cannot cull an earlier injection)
         """
         if len(self.programs) <= self.config.population_size:
             return
@@ -1753,32 +2129,31 @@ class ProgramDatabase:
         for island_map in self.island_feature_maps:
             elite_ids.update(island_map.values())
 
-        # Never remove the best program or the excluded (just-added) program
-        protected_ids = {self.best_program_id, exclude_program_id} - {None}
+        # Never remove the best program, the excluded (just-added) program, or any
+        # caller-protected id (e.g. earlier clones in an inject() batch).
+        protected = {self.best_program_id, exclude_program_id} - {None}
+        if protected_ids:
+            protected |= set(protected_ids)
 
         all_programs = list(self.programs.values())
 
         # Split into non-elite (homeless) and elite (cell owners), each sorted by
         # fitness worst-first. Non-elite programs are removed before elite ones.
         non_elite = sorted(
-            [p for p in all_programs if p.id not in elite_ids and p.id not in protected_ids],
+            [p for p in all_programs if p.id not in elite_ids and p.id not in protected],
             key=lambda p: get_fitness_score(p.metrics, self.config.feature_dimensions),
         )
         elite = sorted(
-            [p for p in all_programs if p.id in elite_ids and p.id not in protected_ids],
+            [p for p in all_programs if p.id in elite_ids and p.id not in protected],
             key=lambda p: get_fitness_score(p.metrics, self.config.feature_dimensions),
         )
 
-        # Remove non-elite programs first; only fall back to evicting elite cell
-        # owners (worst first) if removing all homeless programs is not enough.
-        programs_to_remove = non_elite[:num_to_remove]
-        if len(programs_to_remove) < num_to_remove:
-            remaining = num_to_remove - len(programs_to_remove)
-            programs_to_remove.extend(elite[:remaining])
+        programs_to_remove = self._select_removals(num_to_remove, non_elite, elite, all_programs)
 
         # Remove the selected programs
         for program in programs_to_remove:
             program_id = program.id
+            self._journal_removal(program, "population_limit", evictor_id=exclude_program_id)
 
             # Remove from main programs dict
             if program_id in self.programs:
@@ -1830,6 +2205,35 @@ class ProgramDatabase:
         max_generation = max(self.island_generations)
         return (max_generation - self.last_migration_generation) >= self.migration_interval
 
+    def _select_migrants(self, island_programs: List[Program]) -> List[Program]:
+        """Choose an island's migrants: the top `migration_rate` fraction by fitness.
+
+        Upstream (lane_group_migration off): one global fitness ranking, top
+        fraction. Group-aware (on): the same fraction taken WITHIN each lane group,
+        so a group whose scores are numerically smaller still sends its best across
+        islands instead of being crowded out of the slots. Rounding is per group
+        (min one per non-empty group), so the migrant total can exceed upstream's.
+        """
+
+        def top_fraction(programs: List[Program]) -> List[Program]:
+            ordered = sorted(
+                programs,
+                key=lambda p: get_fitness_score(p.metrics, self.config.feature_dimensions),
+                reverse=True,
+            )
+            return ordered[: max(1, int(len(ordered) * self.migration_rate))]
+
+        if not self.lane_group_migration:
+            return top_fraction(island_programs)
+
+        by_group: Dict[Any, List[Program]] = {}
+        for program in island_programs:
+            by_group.setdefault(self._lane_of(program), []).append(program)
+        migrants: List[Program] = []
+        for group_programs in by_group.values():
+            migrants.extend(top_fraction(group_programs))
+        return migrants
+
     def migrate_programs(self) -> None:
         """
         Perform migration between islands
@@ -1850,15 +2254,7 @@ class ProgramDatabase:
             if not island_programs:
                 continue
 
-            # Sort by fitness (using combined_score or average metrics)
-            island_programs.sort(
-                key=lambda p: get_fitness_score(p.metrics, self.config.feature_dimensions),
-                reverse=True,
-            )
-
-            # Select top programs for migration
-            num_to_migrate = max(1, int(len(island_programs) * self.migration_rate))
-            migrants = island_programs[:num_to_migrate]
+            migrants = self._select_migrants(island_programs)
 
             # Migrate to adjacent islands (ring topology)
             target_islands = [(i + 1) % len(self.islands), (i - 1) % len(self.islands)]
@@ -2227,6 +2623,10 @@ class ProgramDatabase:
             feature_name: Name of the feature dimension
             value: New value to incorporate into stats
         """
+        # A declared-domain axis has a pinned range and is never ratcheted from
+        # observed values -- that is the whole point of declaring it.
+        if feature_name in self.feature_domains:
+            return
         if feature_name not in self.feature_stats:
             self.feature_stats[feature_name] = {
                 "min": value,
@@ -2254,6 +2654,15 @@ class ProgramDatabase:
         Returns:
             Scaled value in range [0, 1]
         """
+        # Declared-domain axis: scale against the pinned [min, max], clipped, so
+        # the grid never re-folds as observed values drift.
+        domain = self.feature_domains.get(feature_name)
+        if domain is not None:
+            lo, hi = domain[0], domain[1]
+            if hi == lo:
+                return 0.5
+            return min(1.0, max(0.0, (value - lo) / (hi - lo)))
+
         if feature_name not in self.feature_stats:
             # No stats yet, return normalized by a reasonable default
             return min(1.0, max(0.0, value))

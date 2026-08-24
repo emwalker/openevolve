@@ -347,6 +347,65 @@ class DatabaseConfig:
     feature_bins: Union[int, Dict[str, int]] = 10  # Can be int (all dims) or dict (per-dim)
     diversity_reference_size: int = 20  # Size of reference set for diversity calculation
 
+    # Group-balanced population cap. When set to a metric name, the over-cap
+    # eviction removes the worst homeless program from the MOST-populous group
+    # (programs grouped by int(round(metrics[lane_metric]))) rather than the
+    # globally worst homeless program -- so a group whose scores are numerically
+    # larger cannot crowd out another group's low-but-in-group-competitive
+    # members. The metric is arbitrary and domain-agnostic; None = upstream
+    # global worst-first eviction.
+    lane_metric: Optional[str] = None
+
+    # Declared feature-axis domains: {axis: [min, max]} pins an axis's scaling
+    # range instead of ratcheting it from observed values, so a disappearing
+    # category or an outlier cannot stretch the range and re-fold every bin.
+    # Axes absent here keep upstream observed-range scaling. Empty = upstream.
+    feature_domains: Dict[str, List[float]] = field(default_factory=dict)
+
+    # Group-balanced parent sampling (requires lane_metric). Each candidate in the
+    # sampling pool is weighted n ** -gamma, where n is its group's size in that
+    # pool, so a group's aggregate share is n ** (1 - gamma): a group whose scores
+    # are numerically larger stops monopolising parent draws simply by being
+    # bigger. None (or 0.0) = upstream uniform sampling. gamma = 1 gives every
+    # group present an equal share; higher favours under-populated groups.
+    lane_sampling_gamma: Optional[float] = None
+
+    # Within-group rank weighting for parent sampling: a member at 1-based
+    # ascending score rank r of n gets a share proportional to
+    # (1 - w)/n + w * (r/n) ** p of its group's total, so higher-scoring members
+    # of a group are drawn more often. w = 0.0 = uniform within group (upstream);
+    # the (1 - w)/n floor keeps every member reachable. Only applies when
+    # lane_sampling_gamma is set.
+    lane_rank_weight: float = 0.0
+    lane_rank_power: float = 1.0
+
+    # Scope prompt exemplars (the top/previous lists and the inspiration slots) to
+    # the parent's group, with up to lane_cross_inspirations honestly-labelled
+    # exemplars drawn from other groups filling the tail inspiration slots. Lets a
+    # group whose ceiling sits below the global top-N still see its own exemplars
+    # instead of a wall of another group's. False = upstream (global score order).
+    # Requires lane_metric.
+    lane_prompt_scope: bool = False
+    lane_cross_inspirations: int = 1
+
+    # Prefix each program's MAP-Elites cell key with its lane group, giving every
+    # group its own grid: two programs identical on all feature axes but in
+    # different groups occupy different cells and can never contest one, so a
+    # group is isolated structurally rather than via a group-valued feature axis.
+    # The grouping metric should then be dropped from feature_dimensions (it is
+    # the group prefix now, not grid geometry). Requires lane_metric; False =
+    # upstream single shared grid.
+    lane_split_grids: bool = False
+
+    # Select island migrants per lane group (each group's top migration_rate
+    # fraction migrates) instead of by global score, so a group whose scores are
+    # numerically smaller still propagates its best across islands rather than
+    # being shut out of the migration slots by a denser group. Rounding is
+    # per-group (minimum one migrant per non-empty group), so totals can differ
+    # slightly from upstream. Requires lane_metric; False = upstream global-score
+    # selection.
+    lane_group_migration: bool = False
+
     # Migration parameters for island-based evolution
     migration_interval: int = 50  # Migrate every N generations
     migration_rate: float = 0.1  # Fraction of population to migrate
