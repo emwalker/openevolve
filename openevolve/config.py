@@ -362,6 +362,15 @@ class DatabaseConfig:
     # Axes absent here keep upstream observed-range scaling. Empty = upstream.
     feature_domains: Dict[str, List[float]] = field(default_factory=dict)
 
+    # What to do when a program's metrics lack a declared feature dimension.
+    # "error" (default, upstream) raises, which aborts the iteration that
+    # submitted the program -- so one malformed metrics dict costs the whole
+    # iteration, including cases the evaluator cannot control (a stage timeout
+    # returns its own minimal metrics). "floor" instead bins the missing axis at
+    # its declared domain minimum (else 0.0) and logs a warning, so the program
+    # is still placed and the iteration completes.
+    missing_feature_policy: str = "error"
+
     # Group-balanced parent sampling (requires lane_metric). Each candidate in the
     # sampling pool is weighted n ** -gamma, where n is its group's size in that
     # pool, so a group's aggregate share is n ** (1 - gamma): a group whose scores

@@ -1060,6 +1060,18 @@ class ProgramDatabase:
                     bin_idx = int(scaled_value * num_bins)
                     bin_idx = max(0, min(num_bins - 1, bin_idx))
                 coords.append(bin_idx)
+            elif getattr(self.config, "missing_feature_policy", "error") == "floor":
+                # Bin at the axis floor rather than losing the whole iteration.
+                # The program is still placed; a floored coordinate is honest
+                # about carrying no information on this axis.
+                logger.warning(
+                    "Program %s lacks feature dimension '%s'; binning at the axis "
+                    "floor (missing_feature_policy=floor). Available metrics: %s",
+                    program.id,
+                    dim,
+                    list(program.metrics.keys()),
+                )
+                coords.append(0)
             else:
                 # Feature not found - this is an error
                 raise ValueError(
