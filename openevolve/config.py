@@ -268,6 +268,13 @@ class PromptConfig:
     num_top_programs: int = 3
     num_diverse_programs: int = 2
 
+    # Where the "diverse" exemplar slots are drawn from. Upstream takes the next
+    # `num_diverse_programs` by rank after the top ones, which are the top of the
+    # same ordering and so are usually near-copies of it. True draws them
+    # uniformly from the rest of the group instead, so the slots hold what they
+    # are named for. False = upstream.
+    diverse_from_island: bool = False
+
     # Template stochasticity
     use_template_stochasticity: bool = True
     template_variations: Dict[str, List[str]] = field(default_factory=dict)
@@ -432,6 +439,27 @@ class DatabaseConfig:
     feasibility_metric: Optional[str] = None
     violation_metric: Optional[str] = None
     feasibility_min_pool: int = 0
+
+    # Artifact keys copied onto a child's metadata when it is created. Metrics are
+    # coerced to float, so an evaluator that identifies a program by a STRING --
+    # a hash of what it does rather than of its text -- has no way to hand that
+    # identity to the engine; an artifact does. Empty = upstream, where metadata
+    # carries only the engine's own provenance.
+    metadata_from_artifacts: List[str] = field(default_factory=list)
+
+    # Metadata key identifying what a program IS, for the exemplar lists. When
+    # set, each list of programs shown to the generator keeps one member per
+    # distinct value, so a population holding many copies of one thing does not
+    # spend every prompt slot on it. A program carrying no value is never
+    # collapsed. The key is arbitrary and domain-agnostic; None = upstream.
+    dedup_key: Optional[str] = None
+
+    # A metric marking a program the evaluator does not want stored. When set, a
+    # program whose value is truthy is not added -- no entry in the population,
+    # no island, no archive, no cell -- and `add` returns its id as it does for a
+    # novelty rejection. For an evaluator that can tell it has already measured
+    # this exact program; None = upstream, where everything is stored.
+    reject_metric: Optional[str] = None
 
     # Break equal-fitness ties on a metric, lowest first, instead of on arrival
     # order. Where fitness moves in coarse steps, exact ties are common and which

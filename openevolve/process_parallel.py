@@ -6,6 +6,7 @@ import asyncio
 import logging
 import multiprocessing as mp
 import pickle
+import random
 import signal
 import time
 from concurrent.futures import Future, ProcessPoolExecutor
@@ -18,6 +19,7 @@ from openevolve.config import Config
 from openevolve.database import (
     Program,
     ProgramDatabase,
+    dedup_exemplars,
     is_feasible,
     lane_group_of,
     rank_exemplars,
@@ -137,6 +139,36 @@ def _lazy_init_worker_components():
         )
 
 
+def _metadata_from_artifacts(keys: List[str], artifacts: Optional[Dict[str, Any]]) -> dict:
+    """The configured artifact keys, as metadata for a child program.
+
+    Metrics are coerced to float, so an evaluator identifying a program by a
+    string has no way to hand that identity to the engine as a metric. Absent
+    keys contribute nothing, so a program the evaluator could not identify
+    carries no value rather than a placeholder.
+    """
+    if not keys or not artifacts:
+        return {}
+    return {k: artifacts[k] for k in keys if k in artifacts}
+
+
+def _exemplar_slices(config, ranked: List[Program]) -> tuple[List[Program], List[Program]]:
+    """`(previous_programs, programs_for_prompt)` out of one ranked group.
+
+    Upstream takes both from the head of the ranking, so the "diverse" slots are
+    the next-best members of the same order. With `diverse_from_island` they are
+    drawn uniformly from everything below the top slice instead.
+    """
+    top = config.prompt.num_top_programs
+    diverse = config.prompt.num_diverse_programs
+    best = ranked[:top]
+    if not getattr(config.prompt, "diverse_from_island", False):
+        return best, ranked[: top + diverse]
+    rest = ranked[top:]
+    picked = random.sample(rest, min(diverse, len(rest))) if rest else []
+    return best, best + picked
+
+
 def _exemplar_dicts(programs: List[Program], feasibility_metric: Optional[str]) -> List[dict]:
     """`programs` as prompt dicts, each infeasible one stamped `infeasible`.
 
@@ -202,13 +234,13 @@ def _run_iteration_worker(
                 p for p in island_programs if lane_group_of(p, lane_metric) == parent_group
             ]
 
+        # One exemplar per distinct behaviour, where the evaluator identifies one:
+        # a population holding many copies of one program would otherwise spend
+        # every slot on it, and the generator copies what it is shown.
+        island_programs = dedup_exemplars(island_programs, getattr(db_config, "dedup_key", None))
+
         # Use config values for limits instead of hardcoding
-        # Programs for LLM display (includes both top and diverse for inspiration)
-        programs_for_prompt = island_programs[
-            : _worker_config.prompt.num_top_programs + _worker_config.prompt.num_diverse_programs
-        ]
-        # Best programs only (for previous attempts section, focused on top performers)
-        best_programs_only = island_programs[: _worker_config.prompt.num_top_programs]
+        best_programs_only, programs_for_prompt = _exemplar_slices(_worker_config, island_programs)
 
         # Build prompt
         if _worker_config.prompt.programs_as_changes_description:
@@ -347,6 +379,9 @@ def _run_iteration_worker(
             metrics=child_metrics,
             iteration_found=iteration,
             metadata={
+                **_metadata_from_artifacts(
+                    getattr(db_config, "metadata_from_artifacts", []), artifacts
+                ),
                 "changes": changes_summary,
                 "parent_metrics": parent.metrics,
                 "island": parent_island,

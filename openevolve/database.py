@@ -127,6 +127,31 @@ def _group_score(program: "Program") -> float:
     return float(value) if value is not None else float("-inf")
 
 
+def dedup_exemplars(programs: list, key: Optional[str]) -> list:
+    """`programs` with one member per distinct `metadata[key]`, order preserved.
+
+    The exemplar lists are what the generator is shown, and it copies what it
+    sees; a population holding many copies of one program would otherwise spend
+    every slot on that one. A program carrying no value under `key` is never
+    collapsed -- an unidentified program is not thereby a duplicate of another
+    unidentified one. Identity when `key` is None, which is upstream exactly.
+    """
+    if key is None:
+        return programs
+    seen: set = set()
+    out = []
+    for program in programs:
+        value = (program.metadata or {}).get(key)
+        if value is None:
+            out.append(program)
+            continue
+        if value in seen:
+            continue
+        seen.add(value)
+        out.append(program)
+    return out
+
+
 def rank_exemplars(
     programs: list,
     feasibility_metric: Optional[str],
@@ -298,6 +323,8 @@ class ProgramDatabase:
         )
         self.lane_metric: Optional[str] = getattr(config, "lane_metric", None)
         # All inert unless feasibility_metric is set.
+        self.dedup_key: Optional[str] = getattr(config, "dedup_key", None)
+        self.reject_metric: Optional[str] = getattr(config, "reject_metric", None)
         self.feasibility_metric: Optional[str] = getattr(config, "feasibility_metric", None)
         self.feasibility_min_pool: int = int(getattr(config, "feasibility_min_pool", 0) or 0)
         self.violation_metric: Optional[str] = getattr(config, "violation_metric", None)
@@ -405,6 +432,15 @@ class ProgramDatabase:
         Returns:
             Program ID
         """
+        # A program the evaluator has marked as one it has already measured is
+        # not stored at all: it would occupy a population slot, be sampled as a
+        # parent and shown as an exemplar, all on another program's numbers.
+        # Checked before anything is mutated -- the novelty rejection below runs
+        # after the program is already in `self.programs`, and this one must not.
+        if self.reject_metric and (program.metrics or {}).get(self.reject_metric):
+            logger.info(f"Program {program.id} marked {self.reject_metric} and won't be added")
+            return program.id
+
         # Store the program
         # If iteration is provided, update the program's iteration_found
         if iteration is not None:
@@ -847,8 +883,9 @@ class ProgramDatabase:
             )
         else:
             # Sort by combined_score if available, otherwise by average of all numeric metrics,
-            # with any infeasible candidate placed after every feasible one (rank_exemplars).
-            sorted_programs = self.exemplar_order(candidates)
+            # with any infeasible candidate placed after every feasible one (rank_exemplars),
+            # and one entry per distinct behaviour where the evaluator names one.
+            sorted_programs = dedup_exemplars(self.exemplar_order(candidates), self.dedup_key)
 
         return sorted_programs[:n]
 
@@ -1980,12 +2017,12 @@ class ProgramDatabase:
         if not same:  # thin/empty group on this island: upstream owns the fallback
             return None
 
-        same = self.exemplar_order(same, score=_group_score)
+        same = dedup_exemplars(self.exemplar_order(same, score=_group_score), self.dedup_key)
         k = max(0, self.lane_cross_inspirations)
         chosen = same[: max(1, n - k)]
         if k and len(chosen) < n:
             cross = [p for p in members if self._lane_of(p) != parent_group]
-            cross = self.exemplar_order(cross, score=_group_score)
+            cross = dedup_exemplars(self.exemplar_order(cross, score=_group_score), self.dedup_key)
             chosen = chosen + cross[: min(k, n - len(chosen))]
         return chosen[:n]
 
