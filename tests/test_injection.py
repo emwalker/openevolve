@@ -137,3 +137,43 @@ class TestLaneReport(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestInjectCarriesArtifacts(unittest.TestCase):
+    """A clone is a copy of the program, artifacts included.
+
+    An injected program is otherwise the only kind in the archive with no
+    evaluation record -- and a fresh run consists entirely of injected
+    programs, so anything reading artifacts sees nothing exactly at iteration 0.
+    """
+
+    def test_a_clone_carries_artifacts_json_and_dir(self):
+        db = _db()
+        program = _prog("seed", score=0.5)
+        program.artifacts_json = json.dumps({"feedback": "hello", "detail": [1, 2, 3]})
+        program.artifact_dir = "/tmp/artifacts/seed"
+        db.inject(program, [0, 1], iteration=0)
+        for island in (0, 1):
+            clone = db.programs[f"seed-i{island}"]
+            self.assertEqual(clone.artifacts_json, program.artifacts_json)
+            self.assertEqual(clone.artifact_dir, program.artifact_dir)
+            self.assertEqual(json.loads(clone.artifacts_json)["feedback"], "hello")
+
+    def test_a_program_without_artifacts_still_injects(self):
+        db = _db()
+        db.inject(_prog("bare", score=0.5), [0], iteration=0)
+        self.assertIsNone(db.programs["bare-i0"].artifacts_json)
+        self.assertIsNone(db.programs["bare-i0"].artifact_dir)
+
+    def test_artifacts_survive_a_save_and_load(self):
+        db = _db()
+        program = _prog("seed", score=0.5)
+        program.artifacts_json = json.dumps({"feedback": "kept"})
+        db.inject(program, [0], iteration=0)
+        with tempfile.TemporaryDirectory() as tmp:
+            db.save(tmp, 0)
+            other = _db()
+            other.load(tmp)
+            self.assertEqual(
+                json.loads(other.programs["seed-i0"].artifacts_json)["feedback"], "kept"
+            )

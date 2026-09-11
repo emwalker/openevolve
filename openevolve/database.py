@@ -645,6 +645,13 @@ class ProgramDatabase:
                 parent_id=program.parent_id,
                 metrics=dict(program.metrics),
                 iteration_found=iteration if iteration is not None else self.last_iteration,
+                # A clone carries the evaluator's artifacts. Without them an
+                # injected program is the only kind in the archive with no
+                # evaluation record, so anything reading artifacts -- a report,
+                # a resumed prompt -- sees nothing for exactly the programs a
+                # fresh run starts from.
+                artifacts_json=program.artifacts_json,
+                artifact_dir=program.artifact_dir,
                 metadata={
                     **dict(program.metadata),
                     "island": island % len(self.islands),
