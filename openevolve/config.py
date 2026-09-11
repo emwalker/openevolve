@@ -415,6 +415,30 @@ class DatabaseConfig:
     # selection.
     lane_group_migration: bool = False
 
+    # Constraint handling. When `feasibility_metric` names a metric, a program
+    # whose value is <= 0 is archived with its lineage but is never drawn as a
+    # parent, never reported as best, and never preferred over a feasible one
+    # however it scores; the constraint gates, it does not rank. A program that
+    # carries no measurement of it is feasible -- absent is not in breach.
+    # `violation_metric` orders the infeasible ones (lower is closer): until the
+    # population holds anything feasible, selection narrows to the closest half,
+    # which keeps a gradient without collapsing onto one lineage. Once something
+    # clears, `feasibility_min_pool` keeps that many of the closest infeasible
+    # candidates breedable, so a narrow miss is not walled out by the first
+    # arrival. Infeasible programs still appear in prompts -- a near-miss's ideas
+    # are worth showing -- but after every feasible one and labelled as failing.
+    # The metrics are arbitrary and domain-agnostic; None = upstream, where every
+    # program is feasible and none of this applies.
+    feasibility_metric: Optional[str] = None
+    violation_metric: Optional[str] = None
+    feasibility_min_pool: int = 0
+
+    # Break equal-fitness ties on a metric, lowest first, instead of on arrival
+    # order. Where fitness moves in coarse steps, exact ties are common and which
+    # program a cell keeps is otherwise whichever arrived first. A program with no
+    # usable value never displaces one that has it. None = upstream (arrival).
+    tiebreak_metric: Optional[str] = None
+
     # Migration parameters for island-based evolution
     migration_interval: int = 50  # Migrate every N generations
     migration_rate: float = 0.1  # Fraction of population to migrate

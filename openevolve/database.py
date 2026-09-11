@@ -40,6 +40,69 @@ def _safe_avg_metrics(metrics: Dict[str, Any]) -> float:
     return sum(numeric_values) / max(1, len(numeric_values)) if numeric_values else 0.0
 
 
+def is_feasible(program: "Program", feasibility_metric: Optional[str]) -> bool:
+    """Whether `program` may be bred from.
+
+    A missing metric is feasible: a program that has not been measured on the
+    constraint is not thereby in violation of it, and with no
+    `feasibility_metric` configured every program is feasible, which is upstream
+    exactly. Free of side effects.
+    """
+    if feasibility_metric is None:
+        return True
+    value = (program.metrics or {}).get(feasibility_metric)
+    if value is None:
+        return True
+    try:
+        return float(value) > 0.0
+    except (TypeError, ValueError):
+        return True
+
+
+def violation_of(program: "Program", violation_metric: Optional[str]) -> float:
+    """How far `program` is from feasible; lower is closer.
+
+    Absent or unparseable is the worst, so a program carrying no measurement
+    never outranks one that does when the fallback is choosing.
+    """
+    if violation_metric is None:
+        return 0.0
+    value = (program.metrics or {}).get(violation_metric)
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float("inf")
+
+
+def tiebreak_of(program: "Program", tiebreak_metric: Optional[str]) -> Optional[float]:
+    """`program`'s tiebreak value, or None when it carries no usable one.
+
+    None rather than an extreme, so the caller can say what an absent
+    measurement means rather than have a sentinel decide it. Free of side
+    effects.
+    """
+    if tiebreak_metric is None:
+        return None
+    value = (program.metrics or {}).get(tiebreak_metric)
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def breedable(programs: list, feasibility_metric: Optional[str]) -> list:
+    """The members of `programs` worth breeding from.
+
+    The feasible ones when there are any; otherwise all of them, so a scope that
+    has not yet produced a feasible program still yields a parent (ranked by
+    violation elsewhere) rather than nothing. Identity when unconfigured.
+    """
+    if feasibility_metric is None or not programs:
+        return programs
+    feasible = [p for p in programs if is_feasible(p, feasibility_metric)]
+    return feasible or programs
+
+
 def lane_group_of(program: "Program", lane_metric: Optional[str]) -> Any:
     """The program's lane-group key under `lane_metric` (a rounded-int bucket).
 
@@ -62,6 +125,46 @@ def _group_score(program: "Program") -> float:
     """Combined score for within-group ranking; missing sorts to the bottom."""
     value = (program.metrics or {}).get("combined_score") if program.metrics else None
     return float(value) if value is not None else float("-inf")
+
+
+def rank_exemplars(
+    programs: list,
+    feasibility_metric: Optional[str],
+    violation_metric: Optional[str],
+    feature_dimensions: Optional[List[str]] = None,
+    score=None,
+) -> list:
+    """`programs` ordered as exemplars: feasible first, by fitness.
+
+    Selection already ranks feasibility first (`_breedable_ids`, `_is_better`),
+    but the lists a program is *displayed* in were ordered on fitness alone, so
+    an infeasible program that outscored its whole island headed every prompt
+    written there. Infeasible members keep their place in the list -- their
+    ideas are the reason the prompt shows near-misses at all -- but they sort
+    after every feasible one, by violation ascending then fitness.
+
+    `score` is the fitness function the call site already used, so each ranking
+    keeps its own notion of best; the default is the feature-aware fitness.
+    Identity -- today's plain sort -- when no `feasibility_metric` is
+    configured, which is upstream exactly. Free of side effects.
+    """
+    if score is None:
+
+        def score(program: "Program") -> float:
+            return get_fitness_score(program.metrics, feature_dimensions)
+
+    if feasibility_metric is None:
+        return sorted(programs, key=score, reverse=True)
+
+    def key(program: "Program"):
+        feasible = is_feasible(program, feasibility_metric)
+        return (
+            0 if feasible else 1,
+            0.0 if feasible else violation_of(program, violation_metric),
+            -score(program),
+        )
+
+    return sorted(programs, key=key)
 
 
 @dataclass
@@ -194,6 +297,15 @@ class ProgramDatabase:
             getattr(config, "feature_domains", {}) or {}
         )
         self.lane_metric: Optional[str] = getattr(config, "lane_metric", None)
+        # All inert unless feasibility_metric is set.
+        self.feasibility_metric: Optional[str] = getattr(config, "feasibility_metric", None)
+        self.feasibility_min_pool: int = int(getattr(config, "feasibility_min_pool", 0) or 0)
+        self.violation_metric: Optional[str] = getattr(config, "violation_metric", None)
+        # Tiebreak on exactly-equal fitness. Inert unless tiebreak_metric is set.
+        self.tiebreak_metric: Optional[str] = getattr(config, "tiebreak_metric", None)
+        self.tiebreak_lower_is_better: bool = bool(
+            getattr(config, "tiebreak_lower_is_better", True)
+        )
         # First-class record of every program removal (population cap, orphaning).
         self.eviction_journal: List[Dict[str, Any]] = []
 
@@ -645,10 +757,14 @@ class ProgramDatabase:
                 )
                 self.best_program_id = None
 
+        # An infeasible program is never reported as best while a feasible one
+        # exists; with no constraint configured this is every program.
+        pool = breedable(list(self.programs.values()), self.feasibility_metric)
+
         if metric:
             # Sort by specific metric
             sorted_programs = sorted(
-                [p for p in self.programs.values() if metric in p.metrics],
+                [p for p in pool if metric in p.metrics],
                 key=lambda p: p.metrics[metric],
                 reverse=True,
             )
@@ -657,7 +773,7 @@ class ProgramDatabase:
         else:
             # Sort by fitness (excluding feature dimensions)
             sorted_programs = sorted(
-                self.programs.values(),
+                pool,
                 key=lambda p: get_fitness_score(p.metrics, self.config.feature_dimensions),
                 reverse=True,
             )
@@ -730,12 +846,9 @@ class ProgramDatabase:
                 reverse=True,
             )
         else:
-            # Sort by combined_score if available, otherwise by average of all numeric metrics
-            sorted_programs = sorted(
-                candidates,
-                key=lambda p: get_fitness_score(p.metrics, self.config.feature_dimensions),
-                reverse=True,
-            )
+            # Sort by combined_score if available, otherwise by average of all numeric metrics,
+            # with any infeasible candidate placed after every feasible one (rank_exemplars).
+            sorted_programs = self.exemplar_order(candidates)
 
         return sorted_programs[:n]
 
@@ -1290,6 +1403,56 @@ class ProgramDatabase:
 
         return self._llm_judge_novelty(program, self.programs[max_smlty_pid])
 
+    def exemplar_order(self, programs: list, score=None) -> list:
+        """`rank_exemplars` with this database's constraint settings."""
+        return rank_exemplars(
+            programs,
+            self.feasibility_metric,
+            self.violation_metric,
+            self.config.feature_dimensions,
+            score,
+        )
+
+    def _breedable_ids(self, ids: list) -> list:
+        """`ids` narrowed to what may be bred from.
+
+        The feasible ones when the scope has any, topped up to
+        `feasibility_min_pool` with the closest infeasible ones by violation so
+        a narrow miss stays reachable. When it has none — a population that has
+        not yet produced a feasible program — the closest half by violation,
+        which keeps a gradient without collapsing selection onto a single
+        program and losing the diversity the search needs. The identity when
+        unconfigured.
+        """
+        if self.feasibility_metric is None or not ids:
+            return ids
+        known = [pid for pid in ids if pid in self.programs]
+        if not known:
+            return ids
+        feasible = [
+            pid for pid in known if is_feasible(self.programs[pid], self.feasibility_metric)
+        ]
+        if feasible:
+            return self._topped_up(feasible, known)
+        if self.violation_metric is None:
+            return ids
+        return self._closest_by_violation(known)[: max(1, len(known) // 2)]
+
+    def _topped_up(self, feasible: list, known: list) -> list:
+        """`feasible` extended to `feasibility_min_pool` with the closest
+        infeasible members of `known`. Identity when the floor is already met or
+        no violation metric orders the candidates."""
+        shortfall = self.feasibility_min_pool - len(feasible)
+        if shortfall <= 0 or self.violation_metric is None:
+            return feasible
+        chosen = set(feasible)
+        nearest = [pid for pid in self._closest_by_violation(known) if pid not in chosen]
+        return feasible + nearest[:shortfall]
+
+    def _closest_by_violation(self, ids: list) -> list:
+        """`ids` ordered by ascending violation; an absent measurement is worst."""
+        return sorted(ids, key=lambda pid: violation_of(self.programs[pid], self.violation_metric))
+
     def _is_better(self, program1: Program, program2: Program) -> bool:
         """
         Determine if program1 has better FITNESS than program2
@@ -1304,6 +1467,21 @@ class ProgramDatabase:
         Returns:
             True if program1 is better than program2
         """
+        # Feasibility outranks fitness: an infeasible program is kept for its
+        # lineage but never preferred. Two infeasible programs compare by how
+        # far from feasible they are, which is what gives a wholly infeasible
+        # population a direction to move in. Inert unless configured.
+        if self.feasibility_metric is not None:
+            f1 = is_feasible(program1, self.feasibility_metric)
+            f2 = is_feasible(program2, self.feasibility_metric)
+            if f1 != f2:
+                return f1
+            if not f1:
+                v1 = violation_of(program1, self.violation_metric)
+                v2 = violation_of(program2, self.violation_metric)
+                if v1 != v2:
+                    return v1 < v2
+
         # If no metrics, use newest
         if not program1.metrics and not program2.metrics:
             return program1.timestamp > program2.timestamp
@@ -1318,7 +1496,23 @@ class ProgramDatabase:
         fitness1 = get_fitness_score(program1.metrics, self.config.feature_dimensions)
         fitness2 = get_fitness_score(program2.metrics, self.config.feature_dimensions)
 
+        # A coarse fitness leaves programs exactly tied, and which of two equals
+        # is kept is then an accident of arrival order. `tiebreak_metric` makes
+        # it a preference instead. Inert unless configured.
+        if fitness1 == fitness2 and self.tiebreak_metric is not None:
+            return self._wins_tiebreak(program1, program2)
+
         return fitness1 > fitness2
+
+    def _wins_tiebreak(self, program1: Program, program2: Program) -> bool:
+        """Whether `program1` wins on `tiebreak_metric`. A program carrying no
+        measurement loses to one that does, and two unmeasured or two equal
+        programs fall through to upstream's strict `>`, i.e. False."""
+        t1 = tiebreak_of(program1, self.tiebreak_metric)
+        t2 = tiebreak_of(program2, self.tiebreak_metric)
+        if t1 is None or t2 is None:
+            return t2 is None and t1 is not None
+        return t1 < t2 if self.tiebreak_lower_is_better else t1 > t2
 
     def _update_archive(self, program: Program) -> None:
         """
@@ -1516,17 +1710,21 @@ class ProgramDatabase:
                 # Use any available program
                 return next(iter(self.programs.values()))
 
-        # Clean up stale references and sample from current island
-        valid_programs = [pid for pid in current_island_programs if pid in self.programs]
+        # Clean up stale references and sample from current island. Stale means
+        # absent from `programs`; a program the breedable filter declined is
+        # still a member of the island and must survive the cleanup.
+        live_programs = [pid for pid in current_island_programs if pid in self.programs]
 
         # Remove stale program IDs from island
-        if len(valid_programs) < len(current_island_programs):
-            stale_ids = current_island_programs - set(valid_programs)
+        if len(live_programs) < len(current_island_programs):
+            stale_ids = current_island_programs - set(live_programs)
             logger.debug(
                 f"Removing {len(stale_ids)} stale program IDs from island {self.current_island}"
             )
             for stale_id in stale_ids:
                 self.islands[self.current_island].discard(stale_id)
+
+        valid_programs = self._breedable_ids(live_programs)
 
         # If no valid programs after cleanup, reinitialize island
         if not valid_programs:
@@ -1575,15 +1773,19 @@ class ProgramDatabase:
             # Fallback to exploration if no archive
             return self._sample_exploration_parent()
 
-        # Clean up stale references in archive
-        valid_archive = [pid for pid in self.archive if pid in self.programs]
+        # Clean up stale references in archive. As on the island path, only a
+        # program absent from `programs` is stale -- an infeasible one keeps its
+        # archive membership so the violation fallback can still reach it.
+        live_archive = [pid for pid in self.archive if pid in self.programs]
 
         # Remove stale program IDs from archive
-        if len(valid_archive) < len(self.archive):
-            stale_ids = self.archive - set(valid_archive)
+        if len(live_archive) < len(self.archive):
+            stale_ids = self.archive - set(live_archive)
             logger.debug(f"Removing {len(stale_ids)} stale program IDs from archive")
             for stale_id in stale_ids:
                 self.archive.discard(stale_id)
+
+        valid_archive = self._breedable_ids(live_archive)
 
         # If no valid archive programs, fallback to exploration
         if not valid_archive:
@@ -1600,11 +1802,11 @@ class ProgramDatabase:
         ]
 
         if archive_programs_in_island:
-            parent_id = random.choice(archive_programs_in_island)
+            parent_id = random.choice(self._breedable_ids(archive_programs_in_island))
             return self.programs[parent_id]
         else:
             # Fall back to any valid archive program if current island has none
-            parent_id = random.choice(valid_archive)
+            parent_id = random.choice(self._breedable_ids(valid_archive))
             return self.programs[parent_id]
 
     def _sample_random_parent(self) -> Program:
@@ -1615,7 +1817,7 @@ class ProgramDatabase:
             raise ValueError("No programs available for sampling")
 
         # Sample randomly from all programs
-        program_id = random.choice(list(self.programs.keys()))
+        program_id = random.choice(self._breedable_ids(list(self.programs.keys())))
         return self.programs[program_id]
 
     def _sample_from_island_weighted(self, island_id: int) -> Program:
@@ -1629,7 +1831,7 @@ class ProgramDatabase:
             Parent program selected using fitness-weighted sampling
         """
         island_id = island_id % len(self.islands)
-        island_programs = list(self.islands[island_id])
+        island_programs = self._breedable_ids(list(self.islands[island_id]))
 
         if not island_programs:
             # Island is empty, fall back to any available program
@@ -1686,7 +1888,7 @@ class ProgramDatabase:
             Parent program selected uniformly at random
         """
         island_id = island_id % len(self.islands)
-        island_programs = list(self.islands[island_id])
+        island_programs = self._breedable_ids(list(self.islands[island_id]))
 
         if not island_programs:
             # Island is empty, fall back to any available program
@@ -1694,7 +1896,9 @@ class ProgramDatabase:
             return self._sample_random_parent()
 
         # Clean up stale references
-        valid_programs = [pid for pid in island_programs if pid in self.programs]
+        valid_programs = self._breedable_ids(
+            [pid for pid in island_programs if pid in self.programs]
+        )
 
         if not valid_programs:
             logger.warning(
@@ -1724,7 +1928,7 @@ class ProgramDatabase:
             return self._sample_from_island_weighted(island_id)
 
         # Clean up stale references in archive
-        valid_archive = [pid for pid in self.archive if pid in self.programs]
+        valid_archive = self._breedable_ids([pid for pid in self.archive if pid in self.programs])
 
         if not valid_archive:
             logger.warning(
@@ -1776,12 +1980,12 @@ class ProgramDatabase:
         if not same:  # thin/empty group on this island: upstream owns the fallback
             return None
 
-        same.sort(key=_group_score, reverse=True)
+        same = self.exemplar_order(same, score=_group_score)
         k = max(0, self.lane_cross_inspirations)
         chosen = same[: max(1, n - k)]
         if k and len(chosen) < n:
             cross = [p for p in members if self._lane_of(p) != parent_group]
-            cross.sort(key=_group_score, reverse=True)
+            cross = self.exemplar_order(cross, score=_group_score)
             chosen = chosen + cross[: min(k, n - len(chosen))]
         return chosen[:n]
 
@@ -2445,7 +2649,15 @@ class ProgramDatabase:
                     for p in island_programs
                 ]
 
-                best_score = max(scores) if scores else 0.0
+                # The fitness of the program this island ranks best, not the
+                # island's highest number: those differ when the top scorer is
+                # infeasible, and the id printed beside this is the ranked one.
+                ranked = self.exemplar_order(island_programs)
+                best_score = (
+                    get_fitness_score(ranked[0].metrics, self.config.feature_dimensions)
+                    if ranked
+                    else 0.0
+                )
                 avg_score = sum(scores) / len(scores) if scores else 0.0
                 diversity = self._calculate_island_diversity(island_programs)
             else:

@@ -1,4 +1,4 @@
-### Program {program_number} (Score: {score})
+### Program {program_number} (Score: {score}{feasibility})
 ```{language}
 {program_snippet}
 ```

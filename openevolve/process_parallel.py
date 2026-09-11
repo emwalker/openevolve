@@ -15,7 +15,13 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from openevolve.config import Config
-from openevolve.database import Program, ProgramDatabase, lane_group_of
+from openevolve.database import (
+    Program,
+    ProgramDatabase,
+    is_feasible,
+    lane_group_of,
+    rank_exemplars,
+)
 from openevolve.utils.metrics_utils import safe_numeric_average
 
 logger = logging.getLogger(__name__)
@@ -131,6 +137,23 @@ def _lazy_init_worker_components():
         )
 
 
+def _exemplar_dicts(programs: List[Program], feasibility_metric: Optional[str]) -> List[dict]:
+    """`programs` as prompt dicts, each infeasible one stamped `infeasible`.
+
+    The prompt renders a program under its score, and a score says nothing about
+    whether the program cleared the constraint. The flag is what the templates
+    turn into a label; absent when the program is feasible or nothing is
+    configured, so an unconfigured run's prompts are unchanged.
+    """
+    out = []
+    for program in programs:
+        payload = program.to_dict()
+        if not is_feasible(program, feasibility_metric):
+            payload["infeasible"] = True
+        out.append(payload)
+    return out
+
+
 def _run_iteration_worker(
     iteration: int, db_snapshot: Dict[str, Any], parent_id: str, inspiration_ids: List[str]
 ) -> SerializableResult:
@@ -154,10 +177,18 @@ def _run_iteration_worker(
             programs[pid] for pid in db_snapshot["islands"][parent_island] if pid in programs
         ]
 
-        # Sort by metrics for top programs
-        island_programs.sort(
-            key=lambda p: p.metrics.get("combined_score", safe_numeric_average(p.metrics)),
-            reverse=True,
+        # Sort by metrics for top programs, feasible ones first: an infeasible
+        # program heading this list becomes "Program 1" in every prompt written
+        # on its island, and its score is the one number about it that is not
+        # worth copying.
+        db_config = _worker_config.database
+        feasibility_metric = getattr(db_config, "feasibility_metric", None)
+        island_programs = rank_exemplars(
+            island_programs,
+            feasibility_metric,
+            getattr(db_config, "violation_metric", None),
+            getattr(db_config, "feature_dimensions", None),
+            score=lambda p: p.metrics.get("combined_score", safe_numeric_average(p.metrics)),
         )
 
         # Scope the exemplar lists to the parent's group when configured, so a
@@ -193,9 +224,9 @@ def _run_iteration_worker(
             current_program=parent.code,
             parent_program=parent.code,
             program_metrics=parent.metrics,
-            previous_programs=[p.to_dict() for p in best_programs_only],
-            top_programs=[p.to_dict() for p in programs_for_prompt],
-            inspirations=[p.to_dict() for p in inspirations],
+            previous_programs=_exemplar_dicts(best_programs_only, feasibility_metric),
+            top_programs=_exemplar_dicts(programs_for_prompt, feasibility_metric),
+            inspirations=_exemplar_dicts(inspirations, feasibility_metric),
             language=_worker_config.language,
             evolution_round=iteration,
             diff_based_evolution=_worker_config.diff_based_evolution,

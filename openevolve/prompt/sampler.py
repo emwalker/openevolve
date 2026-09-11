@@ -10,9 +10,9 @@ from openevolve.config import PromptConfig
 from openevolve.prompt.templates import TemplateManager
 from openevolve.utils.format_utils import format_metrics_safe
 from openevolve.utils.metrics_utils import (
-    safe_numeric_average,
-    get_fitness_score,
     format_feature_coordinates,
+    get_fitness_score,
+    safe_numeric_average,
 )
 
 logger = logging.getLogger(__name__)
@@ -253,6 +253,19 @@ class PromptSampler:
 
         return "\n".join(f"- {area}" for area in improvement_areas)
 
+    def _infeasibility_label(self, program: Dict[str, Any], fragment: str) -> str:
+        """The gate label for `program`, or "" when it cleared the gate.
+
+        The prompt renders every program under a score, and the score says
+        nothing about whether it was admissible; a program shown for its ideas
+        has to be distinguishable from one shown for its numbers. Empty unless
+        the caller stamped `infeasible`, so a run with no constraint configured
+        produces byte-identical prompts.
+        """
+        if not program.get("infeasible"):
+            return ""
+        return self.template_manager.get_fragment(fragment)
+
     def _format_evolution_history(
         self,
         previous_programs: List[Dict[str, Any]],
@@ -327,6 +340,7 @@ class PromptSampler:
                     attempt_number=attempt_number,
                     changes=changes,
                     performance=performance_str,
+                    feasibility=self._infeasibility_label(program, "attempt_infeasible"),
                     outcome=outcome,
                 )
                 + "\n\n"
@@ -375,6 +389,7 @@ class PromptSampler:
                 top_program_template.format(
                     program_number=i + 1,
                     score=f"{score:.4f}",
+                    feasibility=self._infeasibility_label(program, "program_infeasible"),
                     language=("text" if self.config.programs_as_changes_description else language),
                     program_snippet=program_code,
                     key_features=key_features_str,
@@ -434,6 +449,7 @@ class PromptSampler:
                         top_program_template.format(
                             program_number=f"D{i + 1}",
                             score=f"{score:.4f}",
+                            feasibility=self._infeasibility_label(program, "program_infeasible"),
                             language=(
                                 "text" if self.config.programs_as_changes_description else language
                             ),
@@ -512,6 +528,7 @@ class PromptSampler:
                 inspiration_program_template.format(
                     program_number=i + 1,
                     score=f"{score:.4f}",
+                    feasibility=self._infeasibility_label(program, "program_infeasible"),
                     program_type=program_type,
                     language=("text" if self.config.programs_as_changes_description else language),
                     program_snippet=program_code,

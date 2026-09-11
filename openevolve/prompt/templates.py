@@ -2,11 +2,11 @@
 Prompt templates for OpenEvolve
 """
 
-import os
 import json
 import logging
+import os
 from pathlib import Path
-from typing import Dict, List, Optional, Union, Any
+from typing import Any, Dict, List, Optional, Union
 
 logger = logging.getLogger(__name__)
 
@@ -108,11 +108,11 @@ EVOLUTION_HISTORY_TEMPLATE = """## Previous Attempts
 PREVIOUS_ATTEMPT_TEMPLATE = """### Attempt {attempt_number}
 - Changes: {changes}
 - Performance: {performance}
-- Outcome: {outcome}
+- Outcome: {feasibility}{outcome}
 """
 
 # Template for formatting a top program
-TOP_PROGRAM_TEMPLATE = """### Program {program_number} (Score: {score})
+TOP_PROGRAM_TEMPLATE = """### Program {program_number} (Score: {score}{feasibility})
 ```{language}
 {program_snippet}
 ```
@@ -128,7 +128,7 @@ These programs represent diverse approaches and creative solutions that may insp
 """
 
 # Template for formatting an individual inspiration program
-INSPIRATION_PROGRAM_TEMPLATE = """### Inspiration {program_number} (Score: {score}, Type: {program_type})
+INSPIRATION_PROGRAM_TEMPLATE = """### Inspiration {program_number} (Score: {score}{feasibility}, Type: {program_type})
 ```{language}
 {program_snippet}
 ```
@@ -192,9 +192,7 @@ class TemplateManager:
             if self.custom_dir.exists():
                 self._load_from_directory(self.custom_dir)
             else:
-                logger.warning(
-                    f"Custom template directory does not exist, using default prompt."
-                )
+                logger.warning(f"Custom template directory does not exist, using default prompt.")
 
     def _load_from_directory(self, directory: Path) -> None:
         """Load all templates and fragments from a directory"""
