@@ -129,7 +129,7 @@ These programs represent diverse approaches and creative solutions that may insp
 
 # Template for formatting an individual inspiration program
 INSPIRATION_PROGRAM_TEMPLATE = """### Inspiration {program_number} (Score: {score}{feasibility}, Type: {program_type})
-```{language}
+{group_note}```{language}
 {program_snippet}
 ```
 Unique approach: {unique_features}

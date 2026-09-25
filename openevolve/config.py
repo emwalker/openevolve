@@ -404,6 +404,13 @@ class DatabaseConfig:
     lane_prompt_scope: bool = False
     lane_cross_inspirations: int = 1
 
+    # Label each inspiration drawn from outside the parent's group with that
+    # group's name (`lane_names`, keyed by group; the key itself when absent) and
+    # a note that its score was earned there. Requires lane_metric; False =
+    # upstream (inspirations carry no group label).
+    lane_label_cross_inspirations: bool = False
+    lane_names: Dict[int, str] = field(default_factory=dict)
+
     # Prefix each program's MAP-Elites cell key with its lane group, giving every
     # group its own grid: two programs identical on all feature axes but in
     # different groups occupy different cells and can never contest one, so a
@@ -473,6 +480,11 @@ class DatabaseConfig:
 
     # Random seed for reproducible sampling
     random_seed: Optional[int] = 42
+    # Reseed the sampling generator on load() from `random_seed` folded with the
+    # loaded database's last iteration, so consecutive resumed runs draw fresh
+    # numbers; a fresh start is unchanged. False = upstream (every run, resumed or
+    # not, opens on `random_seed`'s stream).
+    resume_seed_folds_iteration: bool = False
 
     # Artifact storage
     artifacts_base_path: Optional[str] = None  # Defaults to db_path/artifacts

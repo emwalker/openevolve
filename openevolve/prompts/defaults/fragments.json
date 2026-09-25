@@ -26,6 +26,7 @@
   "top_program_metrics_prefix": "Performs well on",
   "diverse_program_metrics_prefix": "Alternative approach to",
   "program_infeasible": ", INFEASIBLE: fails the gate -- shown for its ideas, never its score",
+  "inspiration_other_group": "From group {group}: its score was earned in that group and does not carry over to this one.",
   "inspiration_type_diverse": "Diverse",
   "inspiration_type_migrant": "Migrant",
   "inspiration_type_random": "Random",

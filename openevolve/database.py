@@ -3,6 +3,7 @@ Program database for OpenEvolve
 """
 
 import base64
+import hashlib
 import json
 import logging
 import os
@@ -101,6 +102,13 @@ def breedable(programs: list, feasibility_metric: Optional[str]) -> list:
         return programs
     feasible = [p for p in programs if is_feasible(p, feasibility_metric)]
     return feasible or programs
+
+
+def resume_seed(seed: int, iteration: int) -> int:
+    """`seed` folded with `iteration`, deterministically across processes. md5
+    only derives an RNG seed, as the controller's does."""
+    key = f"{seed}:resume:{iteration}".encode("utf-8")
+    return int(hashlib.md5(key, usedforsecurity=False).hexdigest()[:8], 16)
 
 
 def lane_group_of(program: "Program", lane_metric: Optional[str]) -> Any:
@@ -361,6 +369,10 @@ class ProgramDatabase:
             self.lane_split_grids = False
             self.lane_group_migration = False
 
+        # Whether load() has run: under resume_seed_folds_iteration it moves the
+        # sampling seed.
+        self.resumed: bool = False
+
         # Load database from disk if path is provided
         if config.db_path and os.path.exists(config.db_path):
             self.load(config.db_path)
@@ -372,8 +384,8 @@ class ProgramDatabase:
         if config.random_seed is not None:
             import random
 
-            random.seed(config.random_seed)
-            logger.debug(f"Database: Set random seed to {config.random_seed}")
+            random.seed(self.sampling_seed())
+            logger.debug(f"Database: Set random seed to {self.sampling_seed()}")
 
         # Diversity caching infrastructure
         self.diversity_cache: Dict[int, Dict[str, Union[float, float]]] = (
@@ -1038,6 +1050,22 @@ class ProgramDatabase:
 
         # Log the reconstructed island status
         self.log_island_status()
+
+        self.resumed = True
+        if getattr(self.config, "resume_seed_folds_iteration", False):
+            if self.config.random_seed is not None:
+                random.seed(self.sampling_seed())
+                logger.info(f"Database: resumed sampling seed {self.sampling_seed()}")
+
+    def sampling_seed(self) -> Optional[int]:
+        """The seed the sampling generator starts from: `random_seed`, folded with
+        the loaded iteration when resumed under `resume_seed_folds_iteration`."""
+        seed = self.config.random_seed
+        if seed is None or not (
+            self.resumed and getattr(self.config, "resume_seed_folds_iteration", False)
+        ):
+            return seed
+        return resume_seed(seed, self.last_iteration)
 
     def _reconstruct_islands(self, saved_islands: List[List[str]]) -> None:
         """

@@ -1,5 +1,5 @@
 ### Inspiration {program_number} (Score: {score}{feasibility}, Type: {program_type})
-```{language}
+{group_note}```{language}
 {program_snippet}
 ```
 Unique approach: {unique_features}

@@ -186,6 +186,21 @@ def _exemplar_dicts(programs: List[Program], feasibility_metric: Optional[str]) 
     return out
 
 
+def _label_other_groups(
+    payloads: List[dict],
+    programs: List[Program],
+    parent_group: Any,
+    lane_metric: str,
+    names: Dict[Any, str],
+) -> None:
+    """Stamp `other_group` (the group's display name) on each payload whose
+    program sits outside the parent's group, for the prompt to label."""
+    for payload, program in zip(payloads, programs):
+        group = lane_group_of(program, lane_metric)
+        if group != parent_group:
+            payload["other_group"] = names.get(group, names.get(str(group), str(group)))
+
+
 def _run_iteration_worker(
     iteration: int, db_snapshot: Dict[str, Any], parent_id: str, inspiration_ids: List[str]
 ) -> SerializableResult:
@@ -252,13 +267,23 @@ def _run_iteration_worker(
             parent_changes_desc = None
             child_changes_desc = None
 
+        inspiration_dicts = _exemplar_dicts(inspirations, feasibility_metric)
+        if getattr(db_config, "lane_label_cross_inspirations", False) and lane_metric:
+            _label_other_groups(
+                inspiration_dicts,
+                inspirations,
+                lane_group_of(parent, lane_metric),
+                lane_metric,
+                getattr(db_config, "lane_names", None) or {},
+            )
+
         prompt = _worker_prompt_sampler.build_prompt(
             current_program=parent.code,
             parent_program=parent.code,
             program_metrics=parent.metrics,
             previous_programs=_exemplar_dicts(best_programs_only, feasibility_metric),
             top_programs=_exemplar_dicts(programs_for_prompt, feasibility_metric),
-            inspirations=_exemplar_dicts(inspirations, feasibility_metric),
+            inspirations=inspiration_dicts,
             language=_worker_config.language,
             evolution_round=iteration,
             diff_based_evolution=_worker_config.diff_based_evolution,

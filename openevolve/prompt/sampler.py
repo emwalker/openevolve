@@ -526,6 +526,7 @@ class PromptSampler:
 
             inspiration_programs_str += (
                 inspiration_program_template.format(
+                    group_note=self._other_group_note(program),
                     program_number=i + 1,
                     score=f"{score:.4f}",
                     feasibility=self._infeasibility_label(program, "program_infeasible"),
@@ -540,6 +541,14 @@ class PromptSampler:
         return inspirations_section_template.format(
             inspiration_programs=inspiration_programs_str.strip()
         )
+
+    def _other_group_note(self, program: Dict[str, Any]) -> str:
+        """The line naming the group an inspiration came from, or "" when it is
+        from the parent's own group or nothing stamped it (upstream)."""
+        group = program.get("other_group")
+        if group is None:
+            return ""
+        return self.template_manager.get_fragment("inspiration_other_group", group=group) + "\n"
 
     def _determine_program_type(
         self, program: Dict[str, Any], feature_dimensions: Optional[List[str]] = None
