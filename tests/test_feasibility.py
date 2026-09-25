@@ -167,6 +167,13 @@ class TestMinimumBreedablePool(unittest.TestCase):
         db.add(_program("bad", score=0.9, feasible=0.0, violation=0.1))
         self.assertEqual(db.get_best_program().id, "ok")
 
+    def test_without_a_lane_metric_the_pool_is_the_island_pool(self):
+        """The ungrouped path is untouched: one pool, one top-up."""
+        db = self._populate(
+            _database(feasibility_metric="feas", violation_metric="viol", feasibility_min_pool=3)
+        )
+        self.assertEqual(db._breedable_ids(list(db.programs)), ["ok", "p0", "p1"])
+
     def test_min_pool_does_not_change_the_all_infeasible_fallback(self):
         """With nothing feasible the closest-half rule owns the scope; the floor
         is a top-up for the feasible branch only."""
@@ -299,3 +306,81 @@ class TestExemplarOrder(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestGroupedBreedablePool(unittest.TestCase):
+    """With `lane_metric` set the floor applies per group.
+
+    A group with no feasible member is reachable through its own closest-half
+    fallback; a group's top-up is never spent on another group's near-misses.
+    Without the grouping, one group holding every feasible member silences the
+    rest whatever the group-balanced sampler is set to.
+    """
+
+    def _grouped(self, **overrides):
+        return _database(
+            feasibility_metric="feas",
+            violation_metric="viol",
+            lane_metric="lane",
+            **overrides,
+        )
+
+    @staticmethod
+    def _member(pid, lane, *, feasible, violation, score=0.1):
+        program = _program(pid, score=score, feasible=feasible, violation=violation)
+        program.metrics["lane"] = lane
+        return program
+
+    @classmethod
+    def _hold(cls, db, pid, lane, **kwargs):
+        """Put a member in `db.programs` directly.
+
+        `_breedable_ids` reads that mapping alone; going through `add()` would
+        route the fixture through MAP-Elites eviction, which is a different
+        rule and drops members whose cells collide.
+        """
+        db.programs[pid] = cls._member(pid, lane, **kwargs)
+
+    def test_with_a_lane_metric_each_group_keeps_its_own_pool(self):
+        db = self._grouped(feasibility_min_pool=4)
+        for i in range(4):
+            self._hold(db, f"a{i}", 0, feasible=1.0, violation=0.0)
+        self._hold(db, "b0", 1, feasible=0.0, violation=1.0)
+        self._hold(db, "b1", 1, feasible=0.0, violation=2.0)
+
+        breedable = db._breedable_ids(list(db.programs))
+
+        # Group A's four feasible meet the floor exactly, so its top-up is
+        # empty; group B has none feasible and falls back to its closest half.
+        self.assertEqual(set(breedable), {"a0", "a1", "a2", "a3", "b0"})
+        self.assertTrue(any(pid.startswith("b") for pid in breedable))
+
+    def test_a_group_with_a_feasible_member_tops_up_from_its_own_group(self):
+        db = self._grouped(feasibility_min_pool=2)
+        self._hold(db, "a_ok", 0, feasible=1.0, violation=0.0)
+        for i, viol in enumerate([0.5, 3.0, 9.0]):
+            self._hold(db, f"a{i}", 0, feasible=0.0, violation=viol)
+        self._hold(db, "b_ok", 1, feasible=1.0, violation=0.0)
+        for i, viol in enumerate([0.2, 4.0, 8.0]):
+            self._hold(db, f"b{i}", 1, feasible=0.0, violation=viol)
+
+        breedable = set(db._breedable_ids(list(db.programs)))
+
+        # Each group contributes its feasible plus its OWN closest infeasible.
+        # Ungrouped, b0 (0.2) would have taken both top-up slots.
+        self.assertEqual(breedable, {"a_ok", "a0", "b_ok", "b0"})
+
+    def test_a_group_the_sampler_cannot_see_is_the_bug_this_prevents(self):
+        """The pass20 case: every feasible member in one group, the floor met
+        by it alone, and a second group that never becomes breedable."""
+        ungrouped = _database(
+            feasibility_metric="feas", violation_metric="viol", feasibility_min_pool=4
+        )
+        grouped = self._grouped(feasibility_min_pool=4)
+        for db in (ungrouped, grouped):
+            for i in range(4):
+                self._hold(db, f"a{i}", 0, feasible=1.0, violation=0.0)
+            self._hold(db, "b0", 1, feasible=0.0, violation=1.0)
+
+        self.assertNotIn("b0", ungrouped._breedable_ids(list(ungrouped.programs)))
+        self.assertIn("b0", grouped._breedable_ids(list(grouped.programs)))

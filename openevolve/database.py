@@ -1467,19 +1467,39 @@ class ProgramDatabase:
         which keeps a gradient without collapsing selection onto a single
         program and losing the diversity the search needs. The identity when
         unconfigured.
+
+        With `lane_metric` set the rule is applied to each group separately and
+        the results unioned, because a group absent from this pool cannot be
+        reached by any sampler downstream: the group-balanced draw
+        (`lane_sampling_gamma`) can only balance groups that are in it, so one
+        group holding every feasible member would otherwise silence the rest.
         """
         if self.feasibility_metric is None or not ids:
             return ids
         known = [pid for pid in ids if pid in self.programs]
         if not known:
             return ids
+        if self.lane_metric is None:
+            return self._breedable_within(known, ids)
+        groups: Dict[Any, list] = {}
+        for pid in known:
+            groups.setdefault(self._lane_of(self.programs[pid]), []).append(pid)
+        kept = set()
+        for members in groups.values():
+            kept.update(self._breedable_within(members, members))
+        return [pid for pid in known if pid in kept]
+
+    def _breedable_within(self, known: list, fallback: list) -> list:
+        """The breedable rule over one scope: feasible topped up to the floor,
+        else the closest half by violation. `fallback` is returned unchanged
+        when no violation metric orders an all-infeasible scope."""
         feasible = [
             pid for pid in known if is_feasible(self.programs[pid], self.feasibility_metric)
         ]
         if feasible:
             return self._topped_up(feasible, known)
         if self.violation_metric is None:
-            return ids
+            return fallback
         return self._closest_by_violation(known)[: max(1, len(known) // 2)]
 
     def _topped_up(self, feasible: list, known: list) -> list:
