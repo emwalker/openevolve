@@ -339,6 +339,9 @@ class DatabaseConfig:
     elite_selection_ratio: float = 0.1
     exploration_ratio: float = 0.2
     exploitation_ratio: float = 0.7
+    # One trial per nominated metadata value, overriding normal breeding eligibility.
+    parent_trial_key: Optional[str] = None
+    parent_trial_values: List[str] = field(default_factory=list)
     # Note: diversity_metric fixed to "edit_distance"
     diversity_metric: str = "edit_distance"  # Options: "edit_distance", "feature_based"
 

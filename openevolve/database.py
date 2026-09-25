@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple, Union
 import numpy as np
 
 from openevolve.config import DatabaseConfig
+from openevolve.parent_trials import ParentTrials
 from openevolve.utils.code_utils import calculate_edit_distance
 from openevolve.utils.metrics_utils import get_fitness_score, safe_numeric_average
 
@@ -283,6 +284,7 @@ class ProgramDatabase:
 
     def __init__(self, config: DatabaseConfig):
         self.config = config
+        self._parent_trials = ParentTrials(config.parent_trial_key, config.parent_trial_values)
 
         # In-memory program storage
         self.programs: Dict[str, Program] = {}
@@ -717,7 +719,7 @@ class ProgramDatabase:
             Tuple of (parent_program, inspiration_programs)
         """
         # Select parent program
-        parent = self._sample_parent()
+        parent = self._trial_parent(self.current_island) or self._sample_parent()
 
         # Select inspirations
         if num_inspirations is None:
@@ -733,8 +735,8 @@ class ProgramDatabase:
         """
         Sample a program and inspirations from a specific island without modifying current_island
 
-        This method is thread-safe and doesn't modify shared state, avoiding race conditions
-        when multiple workers sample from different islands concurrently.
+        It does not change current_island. Optional parent-trial reservations
+        are shared across islands and protected by a lock.
 
         Uses the same exploration/exploitation/random strategy as sample() to ensure
         consistent behavior between single-process and parallel execution modes.
@@ -759,9 +761,12 @@ class ProgramDatabase:
 
         # Use exploration_ratio and exploitation_ratio to decide sampling strategy
         # This matches the logic in _sample_parent() for consistent behavior
-        rand_val = random.random()
+        parent = self._trial_parent(island_id)
+        rand_val = random.random() if parent is None else 0.0
 
-        if rand_val < self.config.exploration_ratio:
+        if parent is not None:
+            sampling_mode = "parent_trial"
+        elif rand_val < self.config.exploration_ratio:
             # EXPLORATION: Sample randomly from island (diverse sampling)
             parent = self._sample_from_island_random(island_id)
             sampling_mode = "exploration"
@@ -787,6 +792,18 @@ class ProgramDatabase:
             f"(mode: {sampling_mode}, rand_val: {rand_val:.3f})"
         )
         return parent, inspirations
+
+    def _trial_parent(self, island_id: int) -> Optional[Program]:
+        parent = self._parent_trials.draw(
+            self.programs, self.islands[island_id], island_id, self._lane_of, self._breedable_ids
+        )
+        if parent is not None:
+            logger.info("Parent trial reserved: %s on island %s", parent.id, island_id)
+        return parent
+
+    def parent_trial_report(self) -> Optional[dict]:
+        """Nominations and reserved draws, including those awaiting evaluation."""
+        return self._parent_trials.report()
 
     def get_best_program(self, metric: Optional[str] = None) -> Optional[Program]:
         """
@@ -959,6 +976,9 @@ class ProgramDatabase:
         lane_report = self.lane_report()
         if lane_report:
             metadata["lane_report"] = lane_report
+        parent_trials = self.parent_trial_report()
+        if parent_trials is not None:
+            metadata["parent_trials"] = parent_trials
 
         with open(os.path.join(save_path, "metadata.json"), "w") as f:
             json.dump(metadata, f)
@@ -982,6 +1002,7 @@ class ProgramDatabase:
         if os.path.exists(metadata_path):
             with open(metadata_path, "r") as f:
                 metadata = json.load(f)
+            self._parent_trials.restore(metadata.get("parent_trials"))
 
             self.island_feature_maps = metadata.get(
                 "island_feature_maps", [{} for _ in range(self.config.num_islands)]
@@ -1037,6 +1058,7 @@ class ProgramDatabase:
 
         # Reconstruct island assignments from metadata
         self._reconstruct_islands(saved_islands)
+        self._parent_trials.validate(self.programs, self._lane_of)
 
         # Ensure island_generations list has correct length
         if len(self.island_generations) != len(self.islands):
