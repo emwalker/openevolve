@@ -145,12 +145,10 @@ class TestEvaluatorArtifacts(unittest.TestCase):
 
         # Create a mock evaluation file
         self.temp_eval_file = tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False)
-        self.temp_eval_file.write(
-            """
+        self.temp_eval_file.write("""
 def evaluate(program_path):
     return {"score": 0.5}
-"""
-        )
+""")
         self.temp_eval_file.close()
 
         config = EvaluatorConfig()

@@ -2,24 +2,26 @@
 Pytest fixtures for integration tests with optillm server
 """
 
-import pytest
-import subprocess
-import time
 import os
-import tempfile
 import shutil
-from pathlib import Path
+import subprocess
 
 # Import our test utilities
 import sys
+import tempfile
+import time
+from pathlib import Path
+
+import pytest
+
 sys.path.append(str(Path(__file__).parent.parent))
 from test_utils import (
-    start_test_server, 
-    stop_test_server, 
-    is_server_running, 
-    get_integration_config,
+    get_evolution_test_evaluator,
     get_evolution_test_program,
-    get_evolution_test_evaluator
+    get_integration_config,
+    is_server_running,
+    start_test_server,
+    stop_test_server,
 )
 
 
@@ -31,7 +33,7 @@ def optillm_server():
         print("Using existing optillm server at localhost:8000")
         yield {"proc": None, "port": 8000}  # Server already running, don't manage it
         return
-    
+
     print("Starting optillm server for integration tests...")
     proc = None
     port = None

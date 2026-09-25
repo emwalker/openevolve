@@ -2,12 +2,12 @@
 Tests for worker-to-island pinning to ensure true island isolation
 """
 
-import unittest
-from unittest.mock import Mock, patch, MagicMock
 import asyncio
+import unittest
+from unittest.mock import MagicMock, Mock, patch
 
 from openevolve.config import Config, DatabaseConfig, EvaluatorConfig
-from openevolve.database import ProgramDatabase, Program
+from openevolve.database import Program, ProgramDatabase
 from openevolve.process_parallel import ProcessParallelController
 
 
@@ -213,16 +213,24 @@ class TestIslandMigration(unittest.TestCase):
             if program.metadata.get("migrant", False):
                 migrant_count += 1
                 # With new implementation, migrants have clean UUIDs, not "_migrant_" suffixes
-                self.assertNotIn("_migrant_", program.id, 
-                                "New implementation should not create _migrant suffix programs")
+                self.assertNotIn(
+                    "_migrant_",
+                    program.id,
+                    "New implementation should not create _migrant suffix programs",
+                )
 
         # Should have some migrant programs
         self.assertGreater(migrant_count, 0)
-        
+
         # Verify no programs have _migrant_ suffixes anywhere
-        migrant_suffix_count = sum(1 for p in self.database.programs.values() if "_migrant_" in p.id)
-        self.assertEqual(migrant_suffix_count, 0, 
-                        "No programs should have _migrant_ suffixes with new implementation")
+        migrant_suffix_count = sum(
+            1 for p in self.database.programs.values() if "_migrant_" in p.id
+        )
+        self.assertEqual(
+            migrant_suffix_count,
+            0,
+            "No programs should have _migrant_ suffixes with new implementation",
+        )
 
 
 if __name__ == "__main__":

@@ -3,8 +3,9 @@ Test for island parent-child consistency - Programs' parents should be in the co
 """
 
 import unittest
+
 from openevolve.config import Config
-from openevolve.database import ProgramDatabase, Program
+from openevolve.database import Program, ProgramDatabase
 
 
 class TestIslandParentConsistency(unittest.TestCase):
@@ -126,7 +127,7 @@ class TestIslandParentConsistency(unittest.TestCase):
                 self.assertEqual(
                     island_id,
                     prog.metadata.get("island"),
-                    f"Program {prog_id} in island {island_id} should have matching metadata"
+                    f"Program {prog_id} in island {island_id} should have matching metadata",
                 )
 
     def test_explicit_migration_override(self):

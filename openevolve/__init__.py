@@ -3,15 +3,15 @@ OpenEvolve: An open-source implementation of AlphaEvolve
 """
 
 from openevolve._version import __version__
-from openevolve.config import Config
-from openevolve.controller import OpenEvolve
 from openevolve.api import (
-    run_evolution,
-    evolve_function,
+    EvolutionResult,
     evolve_algorithm,
     evolve_code,
-    EvolutionResult,
+    evolve_function,
+    run_evolution,
 )
+from openevolve.config import Config
+from openevolve.controller import OpenEvolve
 
 __all__ = [
     "Config",

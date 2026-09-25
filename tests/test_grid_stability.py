@@ -3,12 +3,12 @@ Integration tests for MAP-Elites grid stability across checkpoints
 """
 
 import os
-import tempfile
 import shutil
+import tempfile
 import unittest
 
-from openevolve.database import ProgramDatabase, Program
 from openevolve.config import DatabaseConfig
+from openevolve.database import Program, ProgramDatabase
 
 
 class TestGridStability(unittest.TestCase):

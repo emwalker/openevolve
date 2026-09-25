@@ -4,6 +4,7 @@ Tests for MAP-Elites feature enhancements in openevolve.database
 
 import unittest
 from unittest.mock import MagicMock, patch
+
 from openevolve.config import Config
 from openevolve.database import Program, ProgramDatabase
 
@@ -285,7 +286,7 @@ class TestMapElitesFeatures(unittest.TestCase):
             language="python",
             metrics={
                 "complexity": 42.5,  # Custom complexity from evaluator (NOT code length)
-                "diversity": 99.9,   # Custom diversity from evaluator (NOT code structure)
+                "diversity": 99.9,  # Custom diversity from evaluator (NOT code structure)
                 "score": 0.8,
             },
         )
@@ -315,10 +316,16 @@ class TestMapElitesFeatures(unittest.TestCase):
         # If built-in was used for complexity, it would use len(code) = 1000
         # If built-in was used for diversity, it would calculate code structure diversity
         # With custom metrics, we should see the bins for 42.5 and 99.9
-        self.assertEqual(coords[0], expected_complexity_bin,
-                        "Custom complexity metric should override built-in code length")
-        self.assertEqual(coords[1], expected_diversity_bin,
-                        "Custom diversity metric should override built-in code diversity")
+        self.assertEqual(
+            coords[0],
+            expected_complexity_bin,
+            "Custom complexity metric should override built-in code length",
+        )
+        self.assertEqual(
+            coords[1],
+            expected_diversity_bin,
+            "Custom diversity metric should override built-in code diversity",
+        )
 
         # Additional verification: test with multiple programs to ensure consistency
         program2 = Program(
@@ -327,7 +334,7 @@ class TestMapElitesFeatures(unittest.TestCase):
             language="python",
             metrics={
                 "complexity": 10.0,  # Much lower than code length
-                "diversity": 5.0,    # Custom diversity
+                "diversity": 5.0,  # Custom diversity
                 "score": 0.6,
             },
         )

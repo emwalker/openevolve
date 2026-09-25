@@ -41,7 +41,9 @@ class TestInspirationDedup(unittest.TestCase):
         )["user"]
 
         # A appears only once (in the top section), not re-listed as an inspiration.
-        self.assertEqual(user.count("def prog_A()"), 1, "Overlapping program must not be duplicated")
+        self.assertEqual(
+            user.count("def prog_A()"), 1, "Overlapping program must not be duplicated"
+        )
         # The unique inspiration C is still present.
         self.assertIn("def prog_C()", user)
         # B (top) present as usual.

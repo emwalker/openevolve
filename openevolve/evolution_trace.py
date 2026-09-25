@@ -179,8 +179,12 @@ class EvolutionTracer:
 
             # Changes descriptions (large-codebase mode)
             if self.include_changes_description:
-                trace.parent_changes_description = getattr(parent_program, "changes_description", None)
-                trace.child_changes_description = getattr(child_program, "changes_description", None)
+                trace.parent_changes_description = getattr(
+                    parent_program, "changes_description", None
+                )
+                trace.child_changes_description = getattr(
+                    child_program, "changes_description", None
+                )
 
             # Optionally include prompts
             if self.include_prompts:
@@ -294,7 +298,9 @@ class EvolutionTracer:
                     "created_at": time.time(),
                     "include_code": self.include_code,
                     "include_prompts": self.include_prompts,
-                    "include_changes_description": getattr(self, "include_changes_description", True),
+                    "include_changes_description": getattr(
+                        self, "include_changes_description", True
+                    ),
                 }
                 export_traces(all_traces, self.output_path, format="hdf5", metadata=metadata)
 

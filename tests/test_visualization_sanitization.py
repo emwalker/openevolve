@@ -16,9 +16,7 @@ class TestCheckJsonFloat(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         """Add scripts directory to path for importing visualizer"""
-        cls.scripts_path = os.path.join(
-            os.path.dirname(__file__), "..", "scripts"
-        )
+        cls.scripts_path = os.path.join(os.path.dirname(__file__), "..", "scripts")
         sys.path.insert(0, cls.scripts_path)
 
     @classmethod
@@ -31,6 +29,7 @@ class TestCheckJsonFloat(unittest.TestCase):
         """Test that positive floats are valid"""
         try:
             from visualizer import check_json_float
+
             self.assertTrue(check_json_float(1.5))
             self.assertTrue(check_json_float(100.0))
             self.assertTrue(check_json_float(0.001))
@@ -41,6 +40,7 @@ class TestCheckJsonFloat(unittest.TestCase):
         """Test that negative floats are valid"""
         try:
             from visualizer import check_json_float
+
             self.assertTrue(check_json_float(-1.5))
             self.assertTrue(check_json_float(-100.0))
         except ImportError:
@@ -50,6 +50,7 @@ class TestCheckJsonFloat(unittest.TestCase):
         """Test that zero is valid"""
         try:
             from visualizer import check_json_float
+
             self.assertTrue(check_json_float(0))
             self.assertTrue(check_json_float(0.0))
         except ImportError:
@@ -59,6 +60,7 @@ class TestCheckJsonFloat(unittest.TestCase):
         """Test that integers are valid"""
         try:
             from visualizer import check_json_float
+
             self.assertTrue(check_json_float(1))
             self.assertTrue(check_json_float(-5))
             self.assertTrue(check_json_float(1000))
@@ -69,7 +71,8 @@ class TestCheckJsonFloat(unittest.TestCase):
         """Test that positive infinity is invalid"""
         try:
             from visualizer import check_json_float
-            self.assertFalse(check_json_float(float('inf')))
+
+            self.assertFalse(check_json_float(float("inf")))
         except ImportError:
             self.skipTest("Visualizer module not available")
 
@@ -77,7 +80,8 @@ class TestCheckJsonFloat(unittest.TestCase):
         """Test that negative infinity is invalid"""
         try:
             from visualizer import check_json_float
-            self.assertFalse(check_json_float(float('-inf')))
+
+            self.assertFalse(check_json_float(float("-inf")))
         except ImportError:
             self.skipTest("Visualizer module not available")
 
@@ -85,7 +89,8 @@ class TestCheckJsonFloat(unittest.TestCase):
         """Test that NaN is invalid"""
         try:
             from visualizer import check_json_float
-            self.assertFalse(check_json_float(float('nan')))
+
+            self.assertFalse(check_json_float(float("nan")))
         except ImportError:
             self.skipTest("Visualizer module not available")
 
@@ -93,6 +98,7 @@ class TestCheckJsonFloat(unittest.TestCase):
         """Test that None is invalid (not a number)"""
         try:
             from visualizer import check_json_float
+
             self.assertFalse(check_json_float(None))
         except ImportError:
             self.skipTest("Visualizer module not available")
@@ -104,9 +110,7 @@ class TestSanitizeProgramForVisualization(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         """Add scripts directory to path for importing visualizer"""
-        cls.scripts_path = os.path.join(
-            os.path.dirname(__file__), "..", "scripts"
-        )
+        cls.scripts_path = os.path.join(os.path.dirname(__file__), "..", "scripts")
         sys.path.insert(0, cls.scripts_path)
 
     @classmethod
@@ -120,10 +124,7 @@ class TestSanitizeProgramForVisualization(unittest.TestCase):
         try:
             from visualizer import sanitize_program_for_visualization
 
-            program = {
-                "metrics": {"combined_score": float('-inf')},
-                "metadata": {}
-            }
+            program = {"metrics": {"combined_score": float("-inf")}, "metadata": {}}
             sanitize_program_for_visualization(program)
             self.assertIsNone(program["metrics"]["combined_score"])
         except ImportError:
@@ -134,10 +135,7 @@ class TestSanitizeProgramForVisualization(unittest.TestCase):
         try:
             from visualizer import sanitize_program_for_visualization
 
-            program = {
-                "metrics": {"score": float('inf')},
-                "metadata": {}
-            }
+            program = {"metrics": {"score": float("inf")}, "metadata": {}}
             sanitize_program_for_visualization(program)
             self.assertIsNone(program["metrics"]["score"])
         except ImportError:
@@ -148,10 +146,7 @@ class TestSanitizeProgramForVisualization(unittest.TestCase):
         try:
             from visualizer import sanitize_program_for_visualization
 
-            program = {
-                "metrics": {"validity": float('nan')},
-                "metadata": {}
-            }
+            program = {"metrics": {"validity": float("nan")}, "metadata": {}}
             sanitize_program_for_visualization(program)
             self.assertIsNone(program["metrics"]["validity"])
         except ImportError:
@@ -162,10 +157,7 @@ class TestSanitizeProgramForVisualization(unittest.TestCase):
         try:
             from visualizer import sanitize_program_for_visualization
 
-            program = {
-                "metrics": {"score": 0.85, "validity": 1.0},
-                "metadata": {}
-            }
+            program = {"metrics": {"score": 0.85, "validity": 1.0}, "metadata": {}}
             sanitize_program_for_visualization(program)
             self.assertEqual(program["metrics"]["score"], 0.85)
             self.assertEqual(program["metrics"]["validity"], 1.0)
@@ -181,10 +173,10 @@ class TestSanitizeProgramForVisualization(unittest.TestCase):
                 "metrics": {"score": 0.5},
                 "metadata": {
                     "parent_metrics": {
-                        "score": float('inf'),
+                        "score": float("inf"),
                         "other": 1.0,
                     }
-                }
+                },
             }
             sanitize_program_for_visualization(program)
             self.assertIsNone(program["metadata"]["parent_metrics"]["score"])
@@ -200,11 +192,11 @@ class TestSanitizeProgramForVisualization(unittest.TestCase):
             program = {
                 "metrics": {
                     "score": 0.5,
-                    "combined_score": float('-inf'),
-                    "validity": float('nan'),
+                    "combined_score": float("-inf"),
+                    "validity": float("nan"),
                     "eval_time": 1.23,
                 },
-                "metadata": {}
+                "metadata": {},
             }
             sanitize_program_for_visualization(program)
 
@@ -233,14 +225,14 @@ class TestJsonSerialization(unittest.TestCase):
 
     def test_unsanitized_infinity_fails_strict_json(self):
         """Test that unsanitized infinity fails strict JSON serialization"""
-        data = {"score": float('inf')}
+        data = {"score": float("inf")}
         # With allow_nan=False (strict JSON compliance), this should fail
         with self.assertRaises(ValueError):
             json.dumps(data, allow_nan=False)
 
     def test_unsanitized_nan_fails_strict_json(self):
         """Test that unsanitized NaN fails strict JSON serialization"""
-        data = {"score": float('nan')}
+        data = {"score": float("nan")}
         # With allow_nan=False (strict JSON compliance), this should fail
         with self.assertRaises(ValueError):
             json.dumps(data, allow_nan=False)

@@ -2,6 +2,7 @@
 Prompt sampling for OpenEvolve
 """
 
+import importlib
 import logging
 import random
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -23,6 +24,14 @@ class PromptSampler:
 
     def __init__(self, config: PromptConfig):
         self.config = config
+        self.context_provider = None
+        if config.context_provider:
+            module, separator, name = config.context_provider.partition(":")
+            if not separator or not module or not name:
+                raise ValueError("context_provider must be module:callable")
+            self.context_provider = getattr(importlib.import_module(module), name)
+            if not callable(self.context_provider):
+                raise ValueError("context_provider must resolve to a callable")
         self.template_manager = TemplateManager(custom_template_dir=config.template_dir)
 
         # Store custom template mappings
@@ -143,9 +152,43 @@ class PromptSampler:
         if self.config.include_artifacts and program_artifacts:
             artifacts_section = self._render_artifacts(program_artifacts)
 
+        context_variables = {}
+        if self.context_provider and user_template_key in ("diff_user", "full_rewrite_user"):
+            context_variables = self.context_provider(
+                {
+                    "current_program": current_program,
+                    "program_metrics": program_metrics,
+                    "program_artifacts": program_artifacts,
+                    "previous_programs": previous_programs,
+                    "top_programs": top_programs,
+                    "inspirations": inspirations,
+                    "evolution_round": evolution_round,
+                }
+            )
+            reserved = {
+                "metrics",
+                "fitness_score",
+                "feature_coords",
+                "feature_dimensions",
+                "improvement_areas",
+                "evolution_history",
+                "current_program",
+                "language",
+                "artifacts",
+            } | set(kwargs)
+            if not isinstance(context_variables, dict) or any(
+                not isinstance(key, str) or not isinstance(value, str) or key in reserved
+                for key, value in context_variables.items()
+            ):
+                raise ValueError(
+                    "context_provider must return nonreserved string template variables"
+                )
+
         # Apply stochastic template variations if enabled
         if self.config.use_template_stochasticity:
-            user_template = self._apply_template_variations(user_template)
+            user_template = self._apply_template_variations(
+                user_template, excluded_keys=context_variables
+            )
 
         # Calculate fitness and feature coordinates for the new template format
         feature_dimensions = feature_dimensions or []
@@ -163,6 +206,7 @@ class PromptSampler:
             current_program=current_program,
             language=language,
             artifacts=artifacts_section,
+            **context_variables,
             **kwargs,
         )
 
@@ -662,13 +706,13 @@ class PromptSampler:
         feature_limit = self.config.num_top_programs
         return ", ".join(features[:feature_limit])
 
-    def _apply_template_variations(self, template: str) -> str:
+    def _apply_template_variations(self, template: str, excluded_keys=()) -> str:
         """Apply stochastic variations to the template"""
         result = template
 
         # Apply variations defined in the config
         for key, variations in self.config.template_variations.items():
-            if variations and f"{{{key}}}" in result:
+            if key not in excluded_keys and variations and f"{{{key}}}" in result:
                 chosen_variation = random.choice(variations)
                 result = result.replace(f"{{{key}}}", chosen_variation)
 

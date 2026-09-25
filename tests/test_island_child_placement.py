@@ -8,7 +8,7 @@ instead of being placed in the target island that was requested for the iteratio
 import unittest
 
 from openevolve.config import Config, DatabaseConfig
-from openevolve.database import ProgramDatabase, Program
+from openevolve.database import Program, ProgramDatabase
 
 
 class TestIslandChildPlacement(unittest.TestCase):
@@ -143,8 +143,9 @@ class TestEmptyIslandChildPlacement(unittest.TestCase):
 
         # Child should be in island 1 (target), not island 0 (parent's island)
         self.assertEqual(
-            child.metadata.get("island"), 1,
-            "Child should be in target island 1, not parent's island 0."
+            child.metadata.get("island"),
+            1,
+            "Child should be in target island 1, not parent's island 0.",
         )
         self.assertIn("child_for_island_1", self.db.islands[1])
 
@@ -226,14 +227,16 @@ class TestIslandPopulationGrowth(unittest.TestCase):
 
         # With the fix, programs should be distributed across all islands
         self.assertGreater(
-            island_sizes[1], 0,
+            island_sizes[1],
+            0,
             f"Island 1 should have programs but has {island_sizes[1]}. "
-            f"All islands: {island_sizes}."
+            f"All islands: {island_sizes}.",
         )
         self.assertGreater(
-            island_sizes[2], 0,
+            island_sizes[2],
+            0,
             f"Island 2 should have programs but has {island_sizes[2]}. "
-            f"All islands: {island_sizes}."
+            f"All islands: {island_sizes}.",
         )
 
         # With the fix, all islands should have at least 1 program
@@ -286,8 +289,9 @@ class TestRegressionOldBehavior(unittest.TestCase):
         # Without target_island, child inherits parent's island (0), not target (2)
         # This is the BUG - child should be in island 2 but ends up in island 0
         self.assertEqual(
-            child.metadata.get("island"), 0,
-            "Without target_island, child incorrectly inherits parent's island"
+            child.metadata.get("island"),
+            0,
+            "Without target_island, child incorrectly inherits parent's island",
         )
 
     def test_with_target_island_child_goes_to_target(self):
@@ -320,8 +324,7 @@ class TestRegressionOldBehavior(unittest.TestCase):
 
         # With target_island, child goes to island 2 (correct)
         self.assertEqual(
-            child.metadata.get("island"), 2,
-            "With target_island, child should go to target island"
+            child.metadata.get("island"), 2, "With target_island, child should go to target island"
         )
 
 

@@ -4,12 +4,12 @@ Tests for process-based parallel controller
 
 import asyncio
 import os
-from pathlib import Path
 import tempfile
-import unittest
-from unittest.mock import Mock, patch, MagicMock
 import time
+import unittest
 from concurrent.futures import Future, ProcessPoolExecutor
+from pathlib import Path
+from unittest.mock import MagicMock, Mock, patch
 
 
 def _slow_test_worker(marker_path: str) -> str:
@@ -21,9 +21,9 @@ def _slow_test_worker(marker_path: str) -> str:
 # Set dummy API key for testing
 os.environ["OPENAI_API_KEY"] = "test"
 
+from openevolve import process_parallel as process_parallel_module
 from openevolve.config import Config, DatabaseConfig, EvaluatorConfig, LLMConfig, PromptConfig
 from openevolve.database import Program, ProgramDatabase
-from openevolve import process_parallel as process_parallel_module
 from openevolve.process_parallel import ProcessParallelController, SerializableResult
 
 

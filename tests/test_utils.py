@@ -4,13 +4,15 @@ Provides common functions and constants for consistent testing
 """
 
 import os
+import socket
+import subprocess
 import sys
 import time
-import subprocess
-import requests
-import socket
 from typing import Optional, Tuple
+
+import requests
 from openai import OpenAI
+
 from openevolve.config import Config, LLMModelConfig
 
 # Standard test model for integration tests - small and fast.

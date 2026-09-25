@@ -2,12 +2,13 @@
 Tests for reasoning_effort configuration parameter
 """
 
-import unittest
-import yaml
 import asyncio
-from unittest.mock import Mock
-import tempfile
 import os
+import tempfile
+import unittest
+from unittest.mock import Mock
+
+import yaml
 
 from openevolve.config import Config, LLMConfig, LLMModelConfig
 from openevolve.llm.openai import OpenAILLM
@@ -28,45 +29,32 @@ class TestReasoningEffortConfig(unittest.TestCase):
                 "timeout": 5000,
                 "retries": 1000000,
                 "reasoning_effort": "high",
-                "models": [
-                    {
-                        "name": "gpt-oss-120b",
-                        "weight": 1.0
-                    }
-                ]
-            }
+                "models": [{"name": "gpt-oss-120b", "weight": 1.0}],
+            },
         }
-        
+
         # This should not raise a TypeError
         config = Config.from_dict(yaml_config)
-        
+
         self.assertEqual(config.llm.reasoning_effort, "high")
         self.assertEqual(config.llm.models[0].reasoning_effort, "high")
 
     def test_reasoning_effort_in_model_config(self):
         """Test that reasoning_effort can be specified per model"""
         yaml_config = {
-            "log_level": "INFO", 
+            "log_level": "INFO",
             "llm": {
                 "api_base": "https://api.openai.com/v1",
                 "api_key": "test-key",
                 "models": [
-                    {
-                        "name": "gpt-oss-120b",
-                        "weight": 1.0,
-                        "reasoning_effort": "medium"
-                    },
-                    {
-                        "name": "gpt-4",
-                        "weight": 0.5,
-                        "reasoning_effort": "high"
-                    }
-                ]
-            }
+                    {"name": "gpt-oss-120b", "weight": 1.0, "reasoning_effort": "medium"},
+                    {"name": "gpt-4", "weight": 0.5, "reasoning_effort": "high"},
+                ],
+            },
         }
-        
+
         config = Config.from_dict(yaml_config)
-        
+
         self.assertEqual(config.llm.models[0].reasoning_effort, "medium")
         self.assertEqual(config.llm.models[1].reasoning_effort, "high")
 
@@ -75,21 +63,21 @@ class TestReasoningEffortConfig(unittest.TestCase):
         yaml_config = {
             "log_level": "INFO",
             "llm": {
-                "api_base": "https://api.openai.com/v1", 
+                "api_base": "https://api.openai.com/v1",
                 "api_key": "test-key",
                 "reasoning_effort": "low",
                 "models": [
                     {
                         "name": "gpt-oss-120b",
-                        "weight": 1.0
+                        "weight": 1.0,
                         # No reasoning_effort specified - should inherit
                     }
-                ]
-            }
+                ],
+            },
         }
-        
+
         config = Config.from_dict(yaml_config)
-        
+
         self.assertEqual(config.llm.reasoning_effort, "low")
         self.assertEqual(config.llm.models[0].reasoning_effort, "low")
 
@@ -99,20 +87,20 @@ class TestReasoningEffortConfig(unittest.TestCase):
             "log_level": "INFO",
             "llm": {
                 "api_base": "https://api.openai.com/v1",
-                "api_key": "test-key", 
+                "api_key": "test-key",
                 "reasoning_effort": "low",
                 "models": [
                     {
                         "name": "gpt-oss-120b",
                         "weight": 1.0,
-                        "reasoning_effort": "high"  # Override parent
+                        "reasoning_effort": "high",  # Override parent
                     }
-                ]
-            }
+                ],
+            },
         }
-        
+
         config = Config.from_dict(yaml_config)
-        
+
         self.assertEqual(config.llm.reasoning_effort, "low")
         self.assertEqual(config.llm.models[0].reasoning_effort, "high")
 
@@ -132,18 +120,18 @@ class TestReasoningEffortConfig(unittest.TestCase):
         model_cfg.api_key = "test-key"
         model_cfg.random_seed = None
         model_cfg.reasoning_effort = "high"
-        
+
         # Mock OpenAI client to avoid actual API calls
-        with unittest.mock.patch('openai.OpenAI'):
+        with unittest.mock.patch("openai.OpenAI"):
             llm = OpenAILLM(model_cfg)
-            
+
         # Verify the reasoning_effort is stored
         self.assertEqual(llm.reasoning_effort, "high")
 
     def test_reasoning_effort_passed_to_api_params(self):
         """Test that reasoning_effort is included in API call parameters"""
         model_cfg = Mock()
-        model_cfg.name = "gpt-oss-120b" 
+        model_cfg.name = "gpt-oss-120b"
         model_cfg.system_message = "system"
         model_cfg.temperature = 0.7
         model_cfg.top_p = 0.95
@@ -155,26 +143,29 @@ class TestReasoningEffortConfig(unittest.TestCase):
         model_cfg.api_key = "test-key"
         model_cfg.random_seed = None
         model_cfg.reasoning_effort = "medium"
-        
-        with unittest.mock.patch('openai.OpenAI'):
+
+        with unittest.mock.patch("openai.OpenAI"):
             llm = OpenAILLM(model_cfg)
-            
+
             # Test the _call_api method directly with mocked client
             mock_response = Mock()
             mock_response.choices = [Mock()]
             mock_response.choices[0].message.content = "Test response"
             llm.client.chat.completions.create.return_value = mock_response
-            
+
             # Test OpenAI reasoning model (gpt-oss-120b at openai.com should use reasoning logic)
             test_params = {
                 "model": "gpt-oss-120b",
-                "messages": [{"role": "system", "content": "Test"}, {"role": "user", "content": "Test"}],
+                "messages": [
+                    {"role": "system", "content": "Test"},
+                    {"role": "user", "content": "Test"},
+                ],
                 "max_completion_tokens": 4096,
-                "reasoning_effort": "medium"
+                "reasoning_effort": "medium",
             }
-            
+
             result = asyncio.run(llm._call_api(test_params))
-            
+
             # Verify the API was called with reasoning_effort
             llm.client.chat.completions.create.assert_called_once_with(**test_params)
 
@@ -194,11 +185,11 @@ llm:
   - name: gpt-oss-120b
     weight: 1.0
 """
-        
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
             f.write(yaml_content)
             f.flush()
-            
+
             try:
                 config = Config.from_yaml(f.name)
                 self.assertEqual(config.llm.reasoning_effort, "high")

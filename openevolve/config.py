@@ -279,6 +279,9 @@ class PromptConfig:
     use_template_stochasticity: bool = True
     template_variations: Dict[str, List[str]] = field(default_factory=dict)
 
+    # Optional importable provider of evolution-template variables (module:callable).
+    context_provider: Optional[str] = None
+
     # Meta-prompting
     # Note: meta-prompting features not implemented
     use_meta_prompting: bool = False

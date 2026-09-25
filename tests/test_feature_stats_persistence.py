@@ -4,13 +4,13 @@ Unit tests for feature_stats persistence in ProgramDatabase checkpoints
 
 import json
 import os
-import tempfile
 import shutil
+import tempfile
 import unittest
 from unittest.mock import patch
 
-from openevolve.database import ProgramDatabase, Program
 from openevolve.config import DatabaseConfig
+from openevolve.database import Program, ProgramDatabase
 
 
 class TestFeatureStatsPersistence(unittest.TestCase):

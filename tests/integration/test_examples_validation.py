@@ -5,9 +5,9 @@ These tests verify that evaluators, configs, and initial programs are properly s
 
 import importlib.util
 import os
+import shutil
 import sys
 import tempfile
-import shutil
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -85,7 +85,7 @@ class TestFunctionMinimizationExample(unittest.TestCase):
         result = evaluator_module.evaluate(str(program_path))
 
         # Check result structure
-        if hasattr(result, 'metrics'):
+        if hasattr(result, "metrics"):
             # EvaluationResult object
             metrics = result.metrics
         else:
@@ -159,6 +159,7 @@ class TestEvaluatorIntegration(unittest.TestCase):
             self.skipTest("function_minimization evaluator not found")
 
         from openevolve.config import EvaluatorConfig
+
         config = EvaluatorConfig(timeout=30, cascade_evaluation=True)
 
         evaluator = Evaluator(config, str(evaluator_path))
@@ -232,7 +233,7 @@ class TestEndToEndWithMockedLLM(unittest.TestCase):
 
     def test_database_stores_and_retrieves_programs(self):
         """Test that the database can store and retrieve programs"""
-        from openevolve.database import ProgramDatabase, Program, DatabaseConfig
+        from openevolve.database import DatabaseConfig, Program, ProgramDatabase
 
         config = DatabaseConfig(population_size=100)
         db = ProgramDatabase(config)
@@ -253,7 +254,7 @@ class TestEndToEndWithMockedLLM(unittest.TestCase):
 
     def test_program_evolution_tracking(self):
         """Test that program generations are tracked correctly"""
-        from openevolve.database import ProgramDatabase, Program, DatabaseConfig
+        from openevolve.database import DatabaseConfig, Program, ProgramDatabase
 
         config = DatabaseConfig(population_size=100)
         db = ProgramDatabase(config)
@@ -325,16 +326,12 @@ class TestExampleStructure(unittest.TestCase):
             # Check for config
             config_files = list(example_dir.glob("*config*.yaml"))
             self.assertGreater(
-                len(config_files), 0,
-                f"{example_name} should have at least one config file"
+                len(config_files), 0, f"{example_name} should have at least one config file"
             )
 
             # Check for evaluator
             evaluator_path = example_dir / "evaluator.py"
-            self.assertTrue(
-                evaluator_path.exists(),
-                f"{example_name} should have evaluator.py"
-            )
+            self.assertTrue(evaluator_path.exists(), f"{example_name} should have evaluator.py")
 
     def test_evaluators_are_importable(self):
         """Test that all evaluators can be imported without errors"""
@@ -344,30 +341,26 @@ class TestExampleStructure(unittest.TestCase):
         for evaluator_path in examples_dir.rglob("evaluator.py"):
             try:
                 spec = importlib.util.spec_from_file_location(
-                    f"evaluator_{evaluator_path.parent.name}",
-                    evaluator_path
+                    f"evaluator_{evaluator_path.parent.name}", evaluator_path
                 )
                 module = importlib.util.module_from_spec(spec)
                 spec.loader.exec_module(module)
 
                 # Verify evaluate function exists
                 if not hasattr(module, "evaluate"):
-                    failed_imports.append(
-                        (str(evaluator_path), "Missing evaluate function")
-                    )
+                    failed_imports.append((str(evaluator_path), "Missing evaluate function"))
             except Exception as e:
                 failed_imports.append((str(evaluator_path), str(e)))
 
         if failed_imports:
             # Only fail if critical examples fail
             critical_failures = [
-                f for f in failed_imports
+                f
+                for f in failed_imports
                 if "function_minimization" in f[0] or "circle_packing" in f[0]
             ]
             if critical_failures:
-                failure_msg = "\n".join(
-                    [f"{path}: {error}" for path, error in critical_failures]
-                )
+                failure_msg = "\n".join([f"{path}: {error}" for path, error in critical_failures])
                 self.fail(f"Critical evaluators failed to import:\n{failure_msg}")
 
 

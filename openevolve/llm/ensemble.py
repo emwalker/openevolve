@@ -7,9 +7,9 @@ import logging
 import random
 from typing import Dict, List, Optional, Tuple
 
+from openevolve.config import LLMModelConfig
 from openevolve.llm.base import LLMInterface
 from openevolve.llm.openai import OpenAILLM
-from openevolve.config import LLMModelConfig
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +19,7 @@ _PROVIDER_REGISTRY = {
 
 try:
     from openevolve.llm.claude_code import ClaudeCodeLLM
+
     _PROVIDER_REGISTRY["claude_code"] = lambda cfg: ClaudeCodeLLM(cfg)
 except ImportError:
     pass

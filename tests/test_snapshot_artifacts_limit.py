@@ -6,7 +6,7 @@ Controls how many artifacts are included in worker process snapshots.
 import unittest
 
 from openevolve.config import Config, DatabaseConfig
-from openevolve.database import ProgramDatabase, Program
+from openevolve.database import Program, ProgramDatabase
 
 
 class TestMaxSnapshotArtifactsConfig(unittest.TestCase):

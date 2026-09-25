@@ -31,8 +31,7 @@ class TestArtifactsIntegration(unittest.TestCase):
 
         # Create evaluation file that can return EvaluationResult
         self.eval_file = tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False)
-        self.eval_file.write(
-            """
+        self.eval_file.write("""
 import traceback
 from openevolve.evaluation_result import EvaluationResult
 
@@ -76,8 +75,7 @@ def evaluate_stage1(program_path):
                 "failure_stage": "stage1_compilation"
             }
         )
-"""
-        )
+""")
         self.eval_file.close()
 
         # Set up config

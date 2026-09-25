@@ -3,16 +3,16 @@ High-level API for using OpenEvolve as a library
 """
 
 import asyncio
-import tempfile
-import os
-import uuid
 import inspect
-from typing import Union, Callable, Optional, List, Dict, Any, Tuple
+import os
+import tempfile
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
+from openevolve.config import Config, LLMModelConfig, load_config
 from openevolve.controller import OpenEvolve
-from openevolve.config import Config, load_config, LLMModelConfig
 from openevolve.database import Program
 
 
@@ -92,7 +92,16 @@ def run_evolution(
         )
     """
     return asyncio.run(
-        _run_evolution_async(initial_program, evaluator, config, iterations, output_dir, cleanup, target_score, checkpoint_path)
+        _run_evolution_async(
+            initial_program,
+            evaluator,
+            config,
+            iterations,
+            output_dir,
+            cleanup,
+            target_score,
+            checkpoint_path,
+        )
     )
 
 
@@ -160,7 +169,9 @@ async def _run_evolution_async(
             output_dir=actual_output_dir,
         )
 
-        best_program = await controller.run(iterations=iterations,target_score=target_score,checkpoint_path=checkpoint_path)
+        best_program = await controller.run(
+            iterations=iterations, target_score=target_score, checkpoint_path=checkpoint_path
+        )
 
         # Prepare result
         best_score = 0.0

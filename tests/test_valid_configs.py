@@ -2,9 +2,9 @@
 Confirming the validity of configuration files in project directories
 """
 
+import itertools
 import os
 import unittest
-import itertools
 from unittest.mock import MagicMock, patch
 
 from openevolve.config import Config, load_config

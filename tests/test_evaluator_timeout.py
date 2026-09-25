@@ -7,7 +7,7 @@ import os
 import tempfile
 import time
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 from openevolve.config import EvaluatorConfig
 from openevolve.evaluator import Evaluator
@@ -22,8 +22,7 @@ class TestEvaluatorTimeout(unittest.TestCase):
         self.test_eval_file = tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False)
 
         # Write test evaluation functions with shorter sleep times for faster tests
-        self.test_eval_file.write(
-            """
+        self.test_eval_file.write("""
 import time
 
 def evaluate(program_path):
@@ -75,8 +74,7 @@ def evaluate_stage3(program_path):
         return {"stage3_score": 1.0}
     else:
         return {"stage3_score": 0.9}
-"""
-        )
+""")
         self.test_eval_file.close()
 
     def tearDown(self):
@@ -400,16 +398,14 @@ class TestTimeoutIntegration(unittest.TestCase):
             # Create a test evaluation file that simulates a long-running evaluation
             test_eval_file = tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False)
 
-            test_eval_file.write(
-                """
+            test_eval_file.write("""
 import time
 
 def evaluate(program_path):
     # Simulate a very long evaluation (like the 11-hour case) 
     time.sleep(6)  # 6 seconds to test timeout (reduced for faster tests)
     return {"accReturn": 0.1, "CalmarRatio": 0.9, "combined_score": 0.82}
-"""
-            )
+""")
             test_eval_file.close()
 
             try:

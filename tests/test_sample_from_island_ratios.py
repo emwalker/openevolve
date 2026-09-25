@@ -7,6 +7,7 @@ to maintain consistent behavior between single-process and parallel execution mo
 
 import random
 import unittest
+
 from openevolve.config import Config
 from openevolve.database import Program, ProgramDatabase
 
@@ -91,7 +92,9 @@ class TestSampleFromIslandRatios(unittest.TestCase):
         # Check that counts are within reasonable bounds (allowing 10% variance)
         expected_exploration = num_samples * self.db.config.exploration_ratio
         expected_exploitation = num_samples * self.db.config.exploitation_ratio
-        expected_weighted = num_samples * (1 - self.db.config.exploration_ratio - self.db.config.exploitation_ratio)
+        expected_weighted = num_samples * (
+            1 - self.db.config.exploration_ratio - self.db.config.exploitation_ratio
+        )
 
         # Allow 15% tolerance for statistical variance
         tolerance = 0.15
@@ -170,6 +173,7 @@ class TestSampleFromIslandRatios(unittest.TestCase):
 
         # Count occurrences
         from collections import Counter
+
         counts = Counter(sampled_ids)
 
         # In exploration mode (uniform random), all programs should have similar counts
@@ -205,9 +209,12 @@ class TestSampleFromIslandRatios(unittest.TestCase):
         avg_sampled_score = sum(sampled_scores) / len(sampled_scores)
 
         # Weighted sampling should favor higher scores (shift average upward from mean)
-        self.assertGreater(avg_sampled_score, mean_score,
-                          f"Weighted sampling should favor high fitness: "
-                          f"sampled_avg={avg_sampled_score:.4f} should be > mean={mean_score:.4f}")
+        self.assertGreater(
+            avg_sampled_score,
+            mean_score,
+            f"Weighted sampling should favor high fitness: "
+            f"sampled_avg={avg_sampled_score:.4f} should be > mean={mean_score:.4f}",
+        )
 
 
 class TestSampleFromIslandEdgeCases(unittest.TestCase):

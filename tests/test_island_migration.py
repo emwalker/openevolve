@@ -3,6 +3,7 @@ Tests for island migration functionality in openevolve.database
 """
 
 import unittest
+
 from openevolve.config import Config
 from openevolve.database import Program, ProgramDatabase
 
@@ -102,15 +103,17 @@ class TestIslandMigration(unittest.TestCase):
         # and ensuring no _migrant_ suffixes exist
         migrant_suffix_ids = [pid for pid in self.db.programs.keys() if "_migrant_" in pid]
         self.assertEqual(len(migrant_suffix_ids), 0, "No programs should have _migrant_ suffixes")
-        
+
         # Verify migration occurred by checking that programs exist in multiple islands
         programs_in_islands = []
         for island_idx, island_map in enumerate(self.db.island_feature_maps):
             programs_in_islands.extend([(pid, island_idx) for pid in island_map.values()])
-        
+
         # Should have programs distributed across islands due to migration
         islands_with_programs = set(island_idx for _, island_idx in programs_in_islands)
-        self.assertGreater(len(islands_with_programs), 1, "Migration should distribute programs across islands")
+        self.assertGreater(
+            len(islands_with_programs), 1, "Migration should distribute programs across islands"
+        )
         # This is a known limitation of the current implementation that processes islands
         # sequentially while modifying them, causing interference between migration rounds.
 
@@ -137,6 +140,7 @@ class TestIslandMigration(unittest.TestCase):
         # Calculate expected migrants based on ACTUAL island population
         # With 50% migration rate, expect ceil(island_0_count * 0.5) migrants
         import math
+
         expected_migrants = math.ceil(island_0_count * self.db.config.migration_rate)
         # Each migrant goes to 2 target islands
         expected_new_programs = expected_migrants * 2
@@ -144,11 +148,15 @@ class TestIslandMigration(unittest.TestCase):
 
         # Should have at least the expected migrants (accounting for MAP-Elites deduplication on targets)
         # Note: actual may be less than expected if migrants are deduplicated on target islands
-        self.assertGreaterEqual(actual_new_programs, 0, "Migration should create new programs or be skipped")
+        self.assertGreaterEqual(
+            actual_new_programs, 0, "Migration should create new programs or be skipped"
+        )
 
         # With new implementation, verify no _migrant_ suffixes exist
         migrant_suffix_programs = [pid for pid in self.db.programs.keys() if "_migrant_" in pid]
-        self.assertEqual(len(migrant_suffix_programs), 0, "No programs should have _migrant_ suffixes")
+        self.assertEqual(
+            len(migrant_suffix_programs), 0, "No programs should have _migrant_ suffixes"
+        )
 
     def test_migration_preserves_best_programs(self):
         """Test that migration selects the best programs for migration"""
@@ -169,16 +177,20 @@ class TestIslandMigration(unittest.TestCase):
 
         # With new implementation, verify programs were migrated but no _migrant_ suffixes exist
         migrant_suffix_programs = [pid for pid in self.db.programs.keys() if "_migrant_" in pid]
-        self.assertEqual(len(migrant_suffix_programs), 0, "No programs should have _migrant_ suffixes")
-        
+        self.assertEqual(
+            len(migrant_suffix_programs), 0, "No programs should have _migrant_ suffixes"
+        )
+
         # Verify that high-quality programs are distributed across islands
         high_score_program = self.db.get("high_score")
         self.assertIsNotNone(high_score_program, "Original high score program should still exist")
-        
+
         # Main requirement: verify migration doesn't create duplicate chains
         # Migration behavior may vary based on feature coordinates and randomness
         total_programs_after = len(self.db.programs)
-        self.assertGreaterEqual(total_programs_after, 3, "Should have at least the original programs")
+        self.assertGreaterEqual(
+            total_programs_after, 3, "Should have at least the original programs"
+        )
 
     def test_migration_updates_generations(self):
         """Test that migration updates the last migration generation"""
@@ -225,18 +237,22 @@ class TestIslandMigration(unittest.TestCase):
         # With new implementation, no _migrant_ suffixes should exist
         migrant_suffix_ids = [pid for pid in self.db.programs.keys() if "_migrant_" in pid]
         self.assertEqual(len(migrant_suffix_ids), 0, "No programs should have _migrant_ suffixes")
-        
+
         # Verify migration created new programs (indicated by increased program count)
         original_program = self.db.get("original")
         self.assertIsNotNone(original_program, "Original program should still exist")
-        
+
         # Check migration behavior - main requirement is no duplicates
         # Migration may or may not distribute to other islands depending on feature coordinates and randomness
         total_programs_after = len(self.db.programs)
-        self.assertGreaterEqual(total_programs_after, 1, "Should have at least the original program")
-        
+        self.assertGreaterEqual(
+            total_programs_after, 1, "Should have at least the original program"
+        )
+
         # Check properties of migrated programs (those marked with migrant metadata)
-        migrated_programs = [p for p in self.db.programs.values() if p.metadata.get("migrant", False)]
+        migrated_programs = [
+            p for p in self.db.programs.values() if p.metadata.get("migrant", False)
+        ]
         for migrant in migrated_programs:
 
             # Should have same code and metrics as original

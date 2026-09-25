@@ -3,6 +3,7 @@ Tests for PromptSampler in openevolve.prompt.sampler
 """
 
 import unittest
+
 from openevolve.config import Config
 from openevolve.prompt.sampler import PromptSampler
 

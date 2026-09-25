@@ -2,10 +2,11 @@
 Tests for template_dir path resolution
 """
 
-import unittest
 import tempfile
-import yaml
+import unittest
 from pathlib import Path
+
+import yaml
 
 from openevolve.config import Config
 

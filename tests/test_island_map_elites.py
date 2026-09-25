@@ -8,6 +8,7 @@ that caused duplicate program chains.
 
 import unittest
 import uuid
+
 from openevolve.config import Config
 from openevolve.database import Program, ProgramDatabase
 
@@ -23,7 +24,9 @@ class TestIslandMapElites(unittest.TestCase):
         config.database.feature_bins = 5  # 5x5 grid
         self.db = ProgramDatabase(config.database)
 
-    def _create_test_program(self, program_id: str, score: float, features: list, island: int = 0) -> Program:
+    def _create_test_program(
+        self, program_id: str, score: float, features: list, island: int = 0
+    ) -> Program:
         """Helper to create a test program with specific features"""
         program = Program(
             id=program_id,
@@ -40,11 +43,15 @@ class TestIslandMapElites(unittest.TestCase):
         """Test that each island gets its own feature map"""
         # Verify we have the correct number of island feature maps
         self.assertEqual(len(self.db.island_feature_maps), 3)
-        
+
         # Each island feature map should be empty initially
         for i, feature_map in enumerate(self.db.island_feature_maps):
-            self.assertEqual(len(feature_map), 0, f"Island {i} feature map should be empty initially")
-            self.assertIsInstance(feature_map, dict, f"Island {i} feature map should be a dictionary")
+            self.assertEqual(
+                len(feature_map), 0, f"Island {i} feature map should be empty initially"
+            )
+            self.assertIsInstance(
+                feature_map, dict, f"Island {i} feature map should be a dictionary"
+            )
 
     def test_program_added_to_correct_island_feature_map(self):
         """Test that programs are added to their island's specific feature map"""
@@ -78,7 +85,9 @@ class TestIslandMapElites(unittest.TestCase):
         """Test that same feature coordinates in different islands don't conflict"""
         # Create programs with identical features but on different islands
         prog1 = self._create_test_program("prog1", 0.8, [0.1, 0.2], island=0)
-        prog2 = self._create_test_program("prog2", 0.9, [0.1, 0.2], island=1)  # Same features, different island
+        prog2 = self._create_test_program(
+            "prog2", 0.9, [0.1, 0.2], island=1
+        )  # Same features, different island
 
         self.db.add(prog1, target_island=0)
         self.db.add(prog2, target_island=1)
@@ -95,7 +104,7 @@ class TestIslandMapElites(unittest.TestCase):
         """Test that a better program replaces existing program in same island's cell"""
         # Create two programs with identical code (same features) but different scores
         identical_code = "def test_function(): return 42"
-        
+
         prog1 = Program(
             id="prog1",
             code=identical_code,
@@ -103,9 +112,9 @@ class TestIslandMapElites(unittest.TestCase):
             metrics={"score": 0.5, "combined_score": 0.5},
             metadata={"island": 0},
         )
-        
+
         prog2 = Program(
-            id="prog2", 
+            id="prog2",
             code=identical_code,  # Same code = same features
             language="python",
             metrics={"score": 0.8, "combined_score": 0.8},  # Better score
@@ -114,17 +123,17 @@ class TestIslandMapElites(unittest.TestCase):
 
         # Add first program
         self.db.add(prog1, target_island=0)
-        
+
         # Should be in the feature map
         feature_map_values_before = list(self.db.island_feature_maps[0].values())
         self.assertIn("prog1", feature_map_values_before)
 
         # Add better program with same features
         self.db.add(prog2, target_island=0)
-        
+
         # Should still have only one program in that cell, but it should be the better one
         feature_map_values_after = list(self.db.island_feature_maps[0].values())
-        
+
         # If they mapped to the same cell, only the better program should remain
         if len(feature_map_values_before) == len(feature_map_values_after):
             self.assertIn("prog2", feature_map_values_after)
@@ -133,7 +142,7 @@ class TestIslandMapElites(unittest.TestCase):
                 self.assertNotIn("prog1", feature_map_values_after)
                 # Verify the worse program is no longer in the database
                 self.assertIsNone(self.db.get("prog1"))
-        
+
         # The better program should always be in the database
         self.assertIsNotNone(self.db.get("prog2"))
 
@@ -157,7 +166,9 @@ class TestIslandMapElites(unittest.TestCase):
         """Test that no programs with _migrant suffixes are created"""
         # Add several programs
         for i in range(10):
-            prog = self._create_test_program(f"prog{i}", 0.5 + i*0.1, [0.1 + i*0.1, 0.2], island=i % 3)
+            prog = self._create_test_program(
+                f"prog{i}", 0.5 + i * 0.1, [0.1 + i * 0.1, 0.2], island=i % 3
+            )
             self.db.add(prog)
 
         # Get all program IDs from all islands
@@ -166,19 +177,20 @@ class TestIslandMapElites(unittest.TestCase):
             all_program_ids.update(island_map.values())
 
         # Verify no program ID contains '_migrant'
-        migrant_programs = [pid for pid in all_program_ids if '_migrant' in pid]
-        self.assertEqual(len(migrant_programs), 0, 
-                        f"Found programs with _migrant suffix: {migrant_programs}")
+        migrant_programs = [pid for pid in all_program_ids if "_migrant" in pid]
+        self.assertEqual(
+            len(migrant_programs), 0, f"Found programs with _migrant suffix: {migrant_programs}"
+        )
 
     def test_checkpoint_serialization_preserves_island_maps(self):
         """Test that saving/loading preserves island feature maps correctly"""
-        import tempfile
         import shutil
-        
+        import tempfile
+
         # Add programs to different islands
         prog1 = self._create_test_program("prog1", 0.8, [0.1, 0.2], island=0)
         prog2 = self._create_test_program("prog2", 0.7, [0.3, 0.4], island=1)
-        
+
         self.db.add(prog1, target_island=0)
         self.db.add(prog2, target_island=1)
 
@@ -199,13 +211,16 @@ class TestIslandMapElites(unittest.TestCase):
 
             # Verify island feature maps are preserved
             self.assertEqual(len(new_db.island_feature_maps), 3)
-            for i, (original_map, loaded_map) in enumerate(zip(original_maps, new_db.island_feature_maps)):
-                self.assertEqual(original_map, loaded_map, 
-                               f"Island {i} feature map not preserved correctly")
-                               
+            for i, (original_map, loaded_map) in enumerate(
+                zip(original_maps, new_db.island_feature_maps)
+            ):
+                self.assertEqual(
+                    original_map, loaded_map, f"Island {i} feature map not preserved correctly"
+                )
+
         finally:
             shutil.rmtree(temp_dir)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

@@ -3,12 +3,12 @@ Tests for checkpoint resume functionality and initial program deduplication
 """
 
 import asyncio
+import json
 import os
 import tempfile
+import time
 import unittest
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
-import json
-import time
 
 # Set dummy API key for testing to prevent OpenAI SDK import failures
 os.environ["OPENAI_API_KEY"] = "test"

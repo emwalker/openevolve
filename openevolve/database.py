@@ -1988,9 +1988,8 @@ class ProgramDatabase:
             return self._sample_random_parent()
 
         # Clean up stale references
-        valid_programs = self._breedable_ids(
-            [pid for pid in island_programs if pid in self.programs]
-        )
+        # Eligibility was applied above; applying it again halves an all-infeasible pool twice.
+        valid_programs = [pid for pid in island_programs if pid in self.programs]
 
         if not valid_programs:
             logger.warning(

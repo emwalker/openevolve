@@ -37,7 +37,7 @@ class TestChangesDescriptionValidation(unittest.TestCase):
             "diff_based_evolution": False,
             "prompt": {
                 "programs_as_changes_description": True,
-            }
+            },
         }
         with self.assertRaises(ValueError) as context:
             Config.from_dict(config_dict)
@@ -50,7 +50,7 @@ class TestChangesDescriptionValidation(unittest.TestCase):
             "diff_based_evolution": True,
             "prompt": {
                 "programs_as_changes_description": True,
-            }
+            },
         }
         config = Config.from_dict(config_dict)
         self.assertTrue(config.prompt.programs_as_changes_description)
@@ -63,7 +63,7 @@ class TestChangesDescriptionValidation(unittest.TestCase):
             "diff_based_evolution": False,
             "prompt": {
                 "programs_as_changes_description": False,
-            }
+            },
         }
         config = Config.from_dict(config_dict)
         self.assertFalse(config.prompt.programs_as_changes_description)
@@ -80,12 +80,11 @@ class TestChangesDescriptionFromDict(unittest.TestCase):
             "prompt": {
                 "programs_as_changes_description": True,
                 "system_message_changes_description": "You are optimizing a large codebase.",
-            }
+            },
         }
         config = Config.from_dict(config_dict)
         self.assertEqual(
-            config.prompt.system_message_changes_description,
-            "You are optimizing a large codebase."
+            config.prompt.system_message_changes_description, "You are optimizing a large codebase."
         )
 
     def test_custom_initial_description(self):
@@ -96,12 +95,12 @@ class TestChangesDescriptionFromDict(unittest.TestCase):
             "prompt": {
                 "programs_as_changes_description": True,
                 "initial_changes_description": "Initial implementation with basic algorithm.",
-            }
+            },
         }
         config = Config.from_dict(config_dict)
         self.assertEqual(
             config.prompt.initial_changes_description,
-            "Initial implementation with basic algorithm."
+            "Initial implementation with basic algorithm.",
         )
 
     def test_all_changes_description_options(self):
@@ -113,18 +112,12 @@ class TestChangesDescriptionFromDict(unittest.TestCase):
                 "programs_as_changes_description": True,
                 "system_message_changes_description": "Custom system message",
                 "initial_changes_description": "Initial state description",
-            }
+            },
         }
         config = Config.from_dict(config_dict)
         self.assertTrue(config.prompt.programs_as_changes_description)
-        self.assertEqual(
-            config.prompt.system_message_changes_description,
-            "Custom system message"
-        )
-        self.assertEqual(
-            config.prompt.initial_changes_description,
-            "Initial state description"
-        )
+        self.assertEqual(config.prompt.system_message_changes_description, "Custom system message")
+        self.assertEqual(config.prompt.initial_changes_description, "Initial state description")
 
 
 class TestPromptConfigChangesDescription(unittest.TestCase):

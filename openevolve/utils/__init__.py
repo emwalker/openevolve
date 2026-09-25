@@ -18,8 +18,8 @@ from openevolve.utils.code_utils import (
     parse_full_rewrite,
 )
 from openevolve.utils.format_utils import (
-    format_metrics_safe,
     format_improvement_safe,
+    format_metrics_safe,
 )
 from openevolve.utils.metrics_utils import (
     safe_numeric_average,

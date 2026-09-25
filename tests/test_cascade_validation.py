@@ -2,13 +2,14 @@
 Tests for cascade evaluation validation functionality in openevolve.evaluator
 """
 
-import unittest
-import tempfile
 import os
-from unittest.mock import patch, MagicMock
+import tempfile
+import unittest
+from unittest.mock import MagicMock, patch
+
 from openevolve.config import Config
-from openevolve.evaluator import Evaluator
 from openevolve.evaluation_result import EvaluationResult
+from openevolve.evaluator import Evaluator
 
 
 class TestCascadeValidation(unittest.IsolatedAsyncioTestCase):

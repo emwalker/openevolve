@@ -4,13 +4,14 @@ Tests the end-to-end flow of using OpenEvolve as a library
 """
 
 import os
-import sys
-import pytest
-import tempfile
 import shutil
+import sys
+import tempfile
 from pathlib import Path
 
-from openevolve import run_evolution, evolve_function, evolve_code, evolve_algorithm
+import pytest
+
+from openevolve import evolve_algorithm, evolve_code, evolve_function, run_evolution
 from openevolve.config import Config, LLMModelConfig
 
 # Reuse the shared test model constant so this config tracks the server's model.

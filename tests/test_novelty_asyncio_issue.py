@@ -7,9 +7,10 @@ triggers a novelty check that uses asyncio.run(), which fails because it's alrea
 running in an event loop.
 """
 
-import unittest
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch, Mock
+import unittest
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
+
 from openevolve.config import Config
 from openevolve.database import Program, ProgramDatabase
 
@@ -25,7 +26,7 @@ class MockLLM:
 class TestNoveltyAsyncioIssue(unittest.TestCase):
     """Test for asyncio.run() error in novelty checking (issue #313)"""
 
-    @patch('openevolve.embedding.EmbeddingClient')
+    @patch("openevolve.embedding.EmbeddingClient")
     def setUp(self, mock_embedding_client_class):
         """Set up test database with novelty checking enabled"""
         # Mock the embedding client
