@@ -72,6 +72,7 @@ class PromptSampler:
         program_artifacts: Optional[Dict[str, Union[str, bytes]]] = None,
         feature_dimensions: Optional[List[str]] = None,
         current_changes_description: Optional[str] = None,
+        recent_attempts: Optional[List[Dict[str, Any]]] = None,
         **kwargs: Any,
     ) -> Dict[str, str]:
         """
@@ -163,6 +164,7 @@ class PromptSampler:
                     "top_programs": top_programs,
                     "inspirations": inspirations,
                     "evolution_round": evolution_round,
+                    "recent_attempts": recent_attempts,
                 }
             )
             reserved = {

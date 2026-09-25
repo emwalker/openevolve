@@ -282,6 +282,9 @@ class PromptConfig:
     # Optional importable provider of evolution-template variables (module:callable).
     context_provider: Optional[str] = None
 
+    # Recent mutations of the selected parent source supplied to the provider.
+    num_recent_attempts: int = 0
+
     # Meta-prompting
     # Note: meta-prompting features not implemented
     use_meta_prompting: bool = False

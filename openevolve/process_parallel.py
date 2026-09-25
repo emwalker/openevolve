@@ -24,6 +24,7 @@ from openevolve.database import (
     lane_group_of,
     rank_exemplars,
 )
+from openevolve.prompt.attempts import recent_attempts
 from openevolve.utils.metrics_utils import safe_numeric_average
 
 logger = logging.getLogger(__name__)
@@ -290,6 +291,9 @@ def _run_iteration_worker(
             program_artifacts=parent_artifacts,
             feature_dimensions=db_snapshot.get("feature_dimensions", []),
             current_changes_description=parent_changes_desc,
+            recent_attempts=recent_attempts(
+                programs, parent, _worker_config.prompt.num_recent_attempts, lane_metric
+            ),
         )
 
         iteration_start = time.time()
