@@ -19,19 +19,25 @@ from openevolve.utils.metrics_utils import (
 logger = logging.getLogger(__name__)
 
 
+def _load_provider(path: Optional[str], field: str):
+    if not path:
+        return None
+    module, separator, name = path.partition(":")
+    if not separator or not module or not name:
+        raise ValueError(f"{field} must be module:callable")
+    provider = getattr(importlib.import_module(module), name)
+    if not callable(provider):
+        raise ValueError(f"{field} must resolve to a callable")
+    return provider
+
+
 class PromptSampler:
     """Generates prompts for code evolution"""
 
     def __init__(self, config: PromptConfig):
         self.config = config
-        self.context_provider = None
-        if config.context_provider:
-            module, separator, name = config.context_provider.partition(":")
-            if not separator or not module or not name:
-                raise ValueError("context_provider must be module:callable")
-            self.context_provider = getattr(importlib.import_module(module), name)
-            if not callable(self.context_provider):
-                raise ValueError("context_provider must resolve to a callable")
+        self.context_provider = _load_provider(config.context_provider, "context_provider")
+        self.context_appender = _load_provider(config.context_appender, "context_appender")
         self.template_manager = TemplateManager(custom_template_dir=config.template_dir)
 
         # Store custom template mappings
@@ -154,19 +160,19 @@ class PromptSampler:
             artifacts_section = self._render_artifacts(program_artifacts)
 
         context_variables = {}
-        if self.context_provider and user_template_key in ("diff_user", "full_rewrite_user"):
-            context_variables = self.context_provider(
-                {
-                    "current_program": current_program,
-                    "program_metrics": program_metrics,
-                    "program_artifacts": program_artifacts,
-                    "previous_programs": previous_programs,
-                    "top_programs": top_programs,
-                    "inspirations": inspirations,
-                    "evolution_round": evolution_round,
-                    "recent_attempts": recent_attempts,
-                }
-            )
+        evolution_template = user_template_key in ("diff_user", "full_rewrite_user")
+        context = {
+            "current_program": current_program,
+            "program_metrics": program_metrics,
+            "program_artifacts": program_artifacts,
+            "previous_programs": previous_programs,
+            "top_programs": top_programs,
+            "inspirations": inspirations,
+            "evolution_round": evolution_round,
+            "recent_attempts": recent_attempts,
+        }
+        if self.context_provider and evolution_template:
+            context_variables = self.context_provider(context)
             reserved = {
                 "metrics",
                 "fitness_score",
@@ -219,6 +225,12 @@ class PromptSampler:
                 user_message=user_message,
                 changes_description=current_changes_description.rstrip(),
             )
+
+        if self.context_appender and evolution_template:
+            extra_context = self.context_appender(context)
+            if not isinstance(extra_context, str):
+                raise ValueError("context_appender must return a string")
+            user_message += extra_context
 
         return {
             "system": system_message,

@@ -282,6 +282,9 @@ class PromptConfig:
     # Optional importable provider of evolution-template variables (module:callable).
     context_provider: Optional[str] = None
 
+    # Optional module:callable returning text appended verbatim to evolution prompts.
+    context_appender: Optional[str] = None
+
     # Recent mutations of the selected parent source supplied to the provider.
     num_recent_attempts: int = 0
 
