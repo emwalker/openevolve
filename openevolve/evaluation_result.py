@@ -4,7 +4,7 @@ Evaluation result structures for OpenEvolve
 
 import json
 from dataclasses import dataclass, field
-from typing import Dict, Union
+from typing import Any, Dict, List, Optional, Union
 
 
 @dataclass
@@ -60,3 +60,16 @@ class EvaluationResult:
     def get_total_artifact_size(self) -> int:
         """Get total size of all artifacts in bytes"""
         return sum(self.get_artifact_size(key) for key in self.artifacts.keys())
+
+
+def artifact_metadata(keys: List[str], artifacts: Optional[Dict[str, Any]]) -> dict:
+    """The configured artifact keys, as metadata for a child program.
+
+    Metrics are coerced to float, so an evaluator identifying a program by a
+    string has no way to hand that identity to the engine as a metric. Absent
+    keys contribute nothing, so a program the evaluator could not identify
+    carries no value rather than a placeholder.
+    """
+    if not keys or not artifacts:
+        return {}
+    return {k: artifacts[k] for k in keys if k in artifacts}

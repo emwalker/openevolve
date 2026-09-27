@@ -65,6 +65,7 @@ class TestInitialProgramArtifacts(unittest.TestCase):
 
     def test_initial_program_artifacts_are_stored(self):
         config = self._make_config()
+        config.database.metadata_from_artifacts = ["note", "absent"]
         controller = OpenEvolve(
             initial_program_path=self.program_file,
             evaluation_file=self.eval_file,
@@ -95,6 +96,9 @@ class TestInitialProgramArtifacts(unittest.TestCase):
         self.assertIsNotNone(artifacts, "Initial program artifacts must be stored, not dropped")
         self.assertEqual(artifacts.get("stderr"), "initial-program-warning")
         self.assertEqual(artifacts.get("note"), "hello")
+        metadata = controller.database.programs[initial_id].metadata
+        self.assertEqual(metadata["note"], "hello")
+        self.assertNotIn("absent", metadata)
 
     def test_no_artifacts_when_evaluator_returns_none(self):
         """When the evaluator returns no artifacts, nothing is stored (and no crash)."""

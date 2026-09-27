@@ -10,7 +10,8 @@ import unittest
 
 from openevolve.config import Config
 from openevolve.database import Program, ProgramDatabase, dedup_exemplars
-from openevolve.process_parallel import _exemplar_slices, _metadata_from_artifacts
+from openevolve.evaluation_result import artifact_metadata
+from openevolve.process_parallel import _exemplar_slices
 
 
 def _program(pid, *, score=0.5, behaviour=None):
@@ -74,19 +75,19 @@ class TestDedupExemplars(unittest.TestCase):
 
 class TestMetadataFromArtifacts(unittest.TestCase):
     def test_a_configured_key_present_in_artifacts_lands_in_metadata(self):
-        got = _metadata_from_artifacts(["behaviour_sha1"], {"behaviour_sha1": "abc", "other": 1})
+        got = artifact_metadata(["behaviour_sha1"], {"behaviour_sha1": "abc", "other": 1})
         self.assertEqual(got, {"behaviour_sha1": "abc"})
 
     def test_an_absent_key_sets_nothing(self):
-        self.assertEqual(_metadata_from_artifacts(["behaviour_sha1"], {"other": 1}), {})
-        self.assertEqual(_metadata_from_artifacts(["behaviour_sha1"], None), {})
+        self.assertEqual(artifact_metadata(["behaviour_sha1"], {"other": 1}), {})
+        self.assertEqual(artifact_metadata(["behaviour_sha1"], None), {})
 
     def test_unconfigured_copies_nothing(self):
-        self.assertEqual(_metadata_from_artifacts([], {"behaviour_sha1": "abc"}), {})
+        self.assertEqual(artifact_metadata([], {"behaviour_sha1": "abc"}), {})
 
     def test_a_string_survives(self):
         """The whole point: metrics are coerced to float, metadata is not."""
-        got = _metadata_from_artifacts(["k"], {"k": "a" * 40})
+        got = artifact_metadata(["k"], {"k": "a" * 40})
         self.assertIsInstance(got["k"], str)
 
 

@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional, Union
 
 from openevolve.config import Config, load_config
 from openevolve.database import Program, ProgramDatabase
+from openevolve.evaluation_result import artifact_metadata
 from openevolve.evaluator import Evaluator
 from openevolve.evolution_trace import EvolutionTracer
 from openevolve.llm.ensemble import LLMEnsemble
@@ -267,19 +268,22 @@ class OpenEvolve:
                 self.initial_program_code, initial_program_id
             )
 
+            initial_artifacts = self.evaluator.get_pending_artifacts(initial_program_id)
             initial_program = Program(
                 id=initial_program_id,
                 code=self.initial_program_code,
                 changes_description=self.config.prompt.initial_changes_description,
                 language=self.config.language,
                 metrics=initial_metrics,
+                metadata=artifact_metadata(
+                    self.config.database.metadata_from_artifacts, initial_artifacts
+                ),
                 iteration_found=start_iteration,
             )
 
             self.database.add(initial_program)
 
-            # Check for and store artifacts from initial program
-            initial_artifacts = self.evaluator.get_pending_artifacts(initial_program_id)
+            # Store the same artifacts used to establish initial metadata.
             if initial_artifacts:
                 self.database.store_artifacts(initial_program_id, initial_artifacts)
                 logger.info(f"Stored artifacts for initial program")

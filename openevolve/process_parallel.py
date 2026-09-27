@@ -24,6 +24,7 @@ from openevolve.database import (
     lane_group_of,
     rank_exemplars,
 )
+from openevolve.evaluation_result import artifact_metadata
 from openevolve.prompt.attempts import recent_attempts
 from openevolve.utils.metrics_utils import safe_numeric_average
 
@@ -138,19 +139,6 @@ def _lazy_init_worker_components():
             database=None,  # No shared database in worker
             suffix=getattr(_worker_config, "file_suffix", ".py"),
         )
-
-
-def _metadata_from_artifacts(keys: List[str], artifacts: Optional[Dict[str, Any]]) -> dict:
-    """The configured artifact keys, as metadata for a child program.
-
-    Metrics are coerced to float, so an evaluator identifying a program by a
-    string has no way to hand that identity to the engine as a metric. Absent
-    keys contribute nothing, so a program the evaluator could not identify
-    carries no value rather than a placeholder.
-    """
-    if not keys or not artifacts:
-        return {}
-    return {k: artifacts[k] for k in keys if k in artifacts}
 
 
 def _exemplar_slices(config, ranked: List[Program]) -> tuple[List[Program], List[Program]]:
@@ -408,9 +396,7 @@ def _run_iteration_worker(
             metrics=child_metrics,
             iteration_found=iteration,
             metadata={
-                **_metadata_from_artifacts(
-                    getattr(db_config, "metadata_from_artifacts", []), artifacts
-                ),
+                **artifact_metadata(getattr(db_config, "metadata_from_artifacts", []), artifacts),
                 "changes": changes_summary,
                 "parent_metrics": parent.metrics,
                 "island": parent_island,
